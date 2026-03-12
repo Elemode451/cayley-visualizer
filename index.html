@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Living Cayley Graph Visualizer</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <canvas id="bgWave"></canvas>
+
+    <main class="layout">
+      <section class="panel">
+        <h1>Living Cayley Graph</h1>
+        <p class="subtitle">
+          A group-theory music visualizer on a toroidal
+          <code>Z<sub>N</sub> x Z<sub>M</sub></code> lattice.
+        </p>
+
+        <div class="controls">
+          <button id="micBtn" type="button">Start Microphone</button>
+          <label class="file-btn" for="audioFile">Load Audio File</label>
+          <input id="audioFile" type="file" accept="audio/*" />
+          <button id="playPauseBtn" type="button" disabled>Play / Pause</button>
+          <button id="restartBtn" type="button" disabled>Restart Song</button>
+          <button id="fullscreenBtn" type="button">Fullscreen</button>
+        </div>
+
+        <div class="sliders">
+          <label>
+            Gain
+            <input id="gainSlider" type="range" min="0" max="2" step="0.01" value="1" />
+          </label>
+          <label>
+            Diffusion
+            <input
+              id="diffusionSlider"
+              type="range"
+              min="0"
+              max="0.35"
+              step="0.01"
+              value="0.1"
+            />
+          </label>
+          <label>
+            Height Scale
+            <input id="heightSlider" type="range" min="0.2" max="2.5" step="0.01" value="1.1" />
+          </label>
+          <label>
+            3D Threshold
+            <input id="morphSlider" type="range" min="0.2" max="0.8" step="0.01" value="0.46" />
+          </label>
+          <label>
+            BG Wave Opacity
+            <input id="bgWaveOpacitySlider" type="range" min="0" max="1" step="0.01" value="0.28" />
+          </label>
+        </div>
+
+        <div class="stats" id="stats">
+          <div><span>Centroid</span><strong id="centroidStat">0 Hz</strong></div>
+          <div><span>Flux</span><strong id="fluxStat">0.00</strong></div>
+          <div><span>Bass</span><strong id="bassStat">0.00</strong></div>
+          <div><span>Beat</span><strong id="beatStat">No</strong></div>
+          <div><span>Shift Symmetry</span><strong id="symmetryStat">0.00</strong></div>
+          <div><span>Mode</span><strong id="modeStat">2D</strong></div>
+        </div>
+
+        <p class="help">
+          Low-energy passages use a 2D character-wheel view of time-shift Fourier modes. Excited passages crossfade
+          into 3D.
+        </p>
+        <p id="modeNarrative" class="mode-note">
+          Time-Shift Characters of Z_N. Excitement and shift-symmetry steer the 2D-to-3D morph.
+        </p>
+
+        <p id="status" class="status">Waiting for audio input.</p>
+
+        <div class="alt-toggle">
+          <span class="alt-label">3D Torus Mode</span>
+          <div class="alt-row">
+            <button id="torusToggleBtn" type="button">Switch To Free-Group Flower</button>
+            <strong id="torusToggleState">Original Torus</strong>
+          </div>
+        </div>
+      </section>
+
+      <section class="viewport-wrap">
+        <canvas id="flatView"></canvas>
+        <canvas id="view"></canvas>
+      </section>
+    </main>
+
+    <audio id="audioPlayer" crossorigin="anonymous"></audio>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>
