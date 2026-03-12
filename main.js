@@ -98,7 +98,7 @@ const freeFlowerTorus = new FreeGroupFlowerView({
   scene,
   majorRadius: MAJOR_RADIUS,
   tubeRadius: TUBE_RADIUS,
-  maxDepth: 6,
+  maxDepth: 8,
 });
 
 setCanvasSize();

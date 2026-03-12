@@ -19,6 +19,7 @@ export class FreeGroupFlowerView {
     this.loopV = 14;
     this.growth = 0;
     this.builtDepth = 0;
+    this.baseStep = 0.62;
 
     this.maxNodes = this.computeMaxNodes(maxDepth);
     this.nodes = [];
@@ -72,33 +73,37 @@ export class FreeGroupFlowerView {
       aCount: 0,
       bCount: 0,
       seed: 0.13,
+      tx: 0,
+      ty: 0,
+      tz: 0,
     });
     this.nodesByDepth[0] = [0];
   }
 
   update(elapsed, frame, active = false) {
-    const drive = clamp(frame.bassEnergy * 1.7 + frame.spectralFlux * 2.2 + frame.beatPulse * 0.9, 0, 1.8);
-    const beatBoost = frame.beat ? 0.2 : 0;
+    const drive = clamp(frame.bassEnergy * 2.5 + frame.spectralFlux * 3.2 + frame.beatPulse * 1.4, 0, 2.6);
     if (frame.hasSignal) {
-      this.growth = clamp(this.growth * 0.96 + drive * 0.08 + beatBoost, 0, this.maxDepth + 0.999);
+      const rise = drive * 0.13 + (frame.beat ? 0.5 : 0.045);
+      this.growth = clamp(this.growth + rise - 0.012, 0, this.maxDepth + 0.999);
     } else {
-      this.growth *= 0.985;
+      this.growth = Math.max(0, this.growth - 0.02);
     }
 
     // Ensure the free-group graph is visibly formed when this mode is selected.
     if (active) {
-      this.growth = Math.max(this.growth, 2.25);
+      this.growth = Math.max(this.growth, 3.4);
     }
 
-    const desiredDepth = Math.min(this.maxDepth, Math.floor(this.growth));
+    const effectiveGrowth = clamp(this.growth + frame.beatPulse * 1.2 + frame.spectralFlux * 1.5, 0, this.maxDepth + 0.999);
+    const desiredDepth = Math.min(this.maxDepth, Math.floor(effectiveGrowth));
     while (this.builtDepth < desiredDepth) {
       this.expandOneDepth();
     }
 
-    this.group.rotation.z += 0.0008 + frame.beatPulse * 0.004;
-    this.group.rotation.x = 0.24 + Math.sin(elapsed * 0.15) * 0.14;
-    this.group.rotation.y = Math.cos(elapsed * 0.11) * 0.16;
-    const scale = 0.96 + clamp(this.growth / this.maxDepth, 0, 1) * 0.3;
+    this.group.rotation.z += 0.0012 + frame.beatPulse * 0.0055;
+    this.group.rotation.x = 0.32 + Math.sin(elapsed * 0.19) * 0.2 + frame.bassEnergy * 0.22;
+    this.group.rotation.y = Math.cos(elapsed * 0.14) * 0.22;
+    const scale = 0.92 + clamp(this.growth / this.maxDepth, 0, 1) * 0.48;
     this.group.scale.setScalar(scale);
 
     this.rebuildGeometry(desiredDepth, elapsed, frame);
@@ -130,7 +135,16 @@ export class FreeGroupFlowerView {
           aCount: parent.aCount + this.generatorA(gen),
           bCount: parent.bCount + this.generatorB(gen),
           seed: this.seedFrom(parent.seed, gen, nextDepth),
+          tx: 0,
+          ty: 0,
+          tz: 0,
         };
+        const dir = this.generatorVector(gen, parent.seed, nextDepth);
+        const stepScale = this.baseStep + nextDepth * 0.05;
+        child.tx = parent.tx + dir.x * stepScale;
+        child.ty = parent.ty + dir.y * stepScale;
+        child.tz = parent.tz + dir.z * stepScale;
+
         const id = this.nodes.length;
         this.nodes.push(child);
         next.push(id);
@@ -217,18 +231,37 @@ export class FreeGroupFlowerView {
       Math.sin(elapsed * 0.4 + node.seed * 3) * 0.15;
 
     const blossom =
-      depthNorm * (0.48 + frame.bassEnergy * 1.3) +
+      depthNorm * (0.58 + frame.bassEnergy * 1.7) +
       bandAmp * 1.2 +
-      frame.beatPulse * 0.22 +
-      Math.sin(elapsed * 1.05 + node.seed * 8.3 + node.depth * 0.7) * (0.08 + frame.beatPulse * 0.16);
+      frame.beatPulse * 0.28 +
+      Math.sin(elapsed * 1.05 + node.seed * 8.3 + node.depth * 0.7) * (0.1 + frame.beatPulse * 0.26);
     const radial = this.tubeRadius + blossom;
 
-    const x = (this.majorRadius + radial * Math.cos(phi)) * Math.cos(theta);
-    const y = (this.majorRadius + radial * Math.cos(phi)) * Math.sin(theta);
-    const z = radial * Math.sin(phi) + Math.sin(theta * 2 + node.seed * 5) * depthNorm * 0.45;
+    const torusX = (this.majorRadius + radial * Math.cos(phi)) * Math.cos(theta);
+    const torusY = (this.majorRadius + radial * Math.cos(phi)) * Math.sin(theta);
+    const torusZ = radial * Math.sin(phi) + Math.sin(theta * 2 + node.seed * 5) * depthNorm * 0.8;
+
+    const branchWave = Math.sin(elapsed * (0.8 + depthNorm * 0.9) + node.seed * 6);
+    const treeX = node.tx * (0.56 + frame.bassEnergy * 0.3) + Math.cos(node.seed * TWO_PI) * branchWave * 0.08;
+    const treeY = node.ty * (0.56 + frame.spectralFlux * 0.7) + Math.sin(node.seed * TWO_PI) * branchWave * 0.08;
+    const treeZ = node.tz * (0.72 + frame.beatPulse * 0.8) + branchWave * (0.3 + depthNorm * 0.8);
+
+    let torusProjection = clamp(
+      (node.depth + this.growth * 0.42 + frame.bassEnergy * 2 + frame.beatPulse * 1.1) / (this.maxDepth * 1.2),
+      0,
+      1
+    );
+    torusProjection = torusProjection * torusProjection * (3 - 2 * torusProjection);
+    if (node.depth === 0) {
+      torusProjection = 0;
+    }
+
+    const x = treeX * (1 - torusProjection) + torusX * torusProjection;
+    const y = treeY * (1 - torusProjection) + torusY * torusProjection;
+    const z = treeZ * (1 - torusProjection) + torusZ * torusProjection;
 
     const hue = modulo(0.03 + depthNorm * 0.58 + bandPhase / TWO_PI + node.seed * 0.1, 1);
-    const light = clamp(0.24 + bandAmp * 0.55 + frame.beatPulse * 0.16, 0, 1);
+    const light = clamp(0.24 + bandAmp * 0.62 + frame.beatPulse * 0.2 + depthNorm * 0.08, 0, 1);
     const [r, g, b] = hslToRgb(hue, 0.82, light);
     return { x, y, z, r, g, b };
   }
@@ -253,5 +286,37 @@ export class FreeGroupFlowerView {
 
   computeMaxNodes(depth) {
     return 1 + 2 * (3 ** depth - 1);
+  }
+
+  generatorVector(gen, parentSeed, depth) {
+    let x = 0;
+    let y = 0;
+    let z = 0;
+
+    if (gen === 'a') {
+      x = 1;
+      z = 0.35;
+    } else if (gen === 'A') {
+      x = -1;
+      z = -0.35;
+    } else if (gen === 'b') {
+      y = 1;
+      z = -0.35;
+    } else if (gen === 'B') {
+      y = -1;
+      z = 0.35;
+    }
+
+    const twist = Math.sin(parentSeed * 19.7 + depth * 1.73) * 0.28;
+    x += twist * 0.7;
+    y += Math.cos(parentSeed * 23.1 + depth * 1.41) * 0.24;
+    z += Math.sin(parentSeed * 17.3 + depth * 1.29) * 0.26;
+
+    const length = Math.hypot(x, y, z) || 1;
+    return {
+      x: x / length,
+      y: y / length,
+      z: z / length,
+    };
   }
 }
