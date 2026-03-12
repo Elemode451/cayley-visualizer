@@ -207,6 +207,10 @@ input[type='range'] {
 .status {
   min-height: 22px;
   margin: 8px 0 0;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 214, 180, 0.28);
+  background: rgba(28, 14, 8, 0.34);
   font-size: 0.84rem;
   color: #ffe0bf;
 }

@@ -143,7 +143,7 @@ gainSlider.addEventListener('input', () => {
   audio.setGain(Number(gainSlider.value));
 });
 
-torusToggleBtn.addEventListener('click', () => {
+function toggleTorusMode() {
   uiState.useFreeTorus = !uiState.useFreeTorus;
   if (uiState.useFreeTorus) {
     // Make the switch visually obvious immediately.
@@ -154,6 +154,15 @@ torusToggleBtn.addEventListener('click', () => {
     setStatus('3D mode: Original Torus');
   }
   updateTorusToggleUI();
+}
+
+document.addEventListener('click', (event) => {
+  const button = event.target?.closest?.('#torusToggleBtn');
+  if (!button || button !== torusToggleBtn) {
+    return;
+  }
+  event.preventDefault();
+  toggleTorusMode();
 });
 
 fullscreenBtn.addEventListener('click', async () => {
@@ -266,7 +275,7 @@ function updateMorphState() {
 
 function updateModeLabel() {
   if (uiState.morph < 0.28) {
-    uiState.modeLabel = '2D Characters';
+    uiState.modeLabel = uiState.useFreeTorus ? '2D (Flower Selected)' : '2D (Original Selected)';
     return;
   }
 
@@ -296,10 +305,10 @@ function updateBlendState() {
 
 function updateTorusToggleUI() {
   if (uiState.useFreeTorus) {
-    torusToggleState.textContent = 'Free-Group Flower';
+    torusToggleState.textContent = 'Free-Group Flower Active';
     torusToggleBtn.textContent = 'Switch To Original Torus';
   } else {
-    torusToggleState.textContent = 'Original Torus';
+    torusToggleState.textContent = 'Original Torus Active';
     torusToggleBtn.textContent = 'Switch To Free-Group Flower';
   }
 }
