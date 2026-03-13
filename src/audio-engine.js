@@ -16,6 +16,7 @@ export class AudioEngine {
     this.micStream = null;
     this.audioMode = null;
     this.currentObjectUrl = null;
+    this.currentLabel = '';
 
     this.bands = null;
     this.characterBins = buildCharacterBins(characterCount, fftSize / 2 - 1);
@@ -105,6 +106,7 @@ export class AudioEngine {
       this.sourceNode = this.audioContext.createMediaStreamSource(this.micStream);
       this.sourceNode.connect(this.analyser);
       this.audioMode = 'mic';
+      this.currentLabel = 'Microphone';
       this.audioElement.pause();
       return { ok: true, message: 'Microphone input active.' };
     } catch (error) {
@@ -129,17 +131,48 @@ export class AudioEngine {
       this.audioElement.load();
       this.audioElement.pause();
       this.audioElement.currentTime = 0;
+      this.currentLabel = file.name;
 
       if (!this.fileSourceNode) {
         this.fileSourceNode = this.audioContext.createMediaElementSource(this.audioElement);
       }
 
       this.sourceNode = this.fileSourceNode;
-      this.sourceNode.connect(this.analyser);
+      this.connectSourceToAnalyser();
       this.audioMode = 'file';
       return { ok: true, message: `Loaded: ${file.name}. Press Play, Space, or K to start.` };
     } catch (error) {
       return { ok: false, message: `File playback error: ${error.message}` };
+    }
+  }
+
+  async loadUrl(url, gain = 1, label = 'stream') {
+    try {
+      await this.ensureReady(gain);
+      this.cleanupSource();
+
+      if (this.currentObjectUrl) {
+        URL.revokeObjectURL(this.currentObjectUrl);
+        this.currentObjectUrl = null;
+      }
+
+      this.audioElement.src = url;
+      this.audioElement.loop = true;
+      this.audioElement.load();
+      this.audioElement.pause();
+      this.audioElement.currentTime = 0;
+      this.currentLabel = label;
+
+      if (!this.fileSourceNode) {
+        this.fileSourceNode = this.audioContext.createMediaElementSource(this.audioElement);
+      }
+
+      this.sourceNode = this.fileSourceNode;
+      this.connectSourceToAnalyser();
+      this.audioMode = 'file';
+      return { ok: true, message: `Loaded stream: ${label}. Press Play, Space, or K to start.` };
+    } catch (error) {
+      return { ok: false, message: `URL playback error: ${error.message}` };
     }
   }
 
@@ -149,9 +182,18 @@ export class AudioEngine {
     }
 
     await this.ensureReady(gain);
+    if (!this.sourceNode && this.fileSourceNode) {
+      this.sourceNode = this.fileSourceNode;
+      this.connectSourceToAnalyser();
+    }
+
     if (this.audioElement.paused) {
-      await this.audioElement.play();
-      return { ok: true, message: `Playing: ${this.getFilename()}` };
+      try {
+        await this.audioElement.play();
+        return { ok: true, message: `Playing: ${this.getFilename()}` };
+      } catch (error) {
+        return { ok: false, message: `Could not start playback: ${error.message}` };
+      }
     }
 
     this.audioElement.pause();
@@ -165,8 +207,12 @@ export class AudioEngine {
 
     await this.ensureReady(gain);
     this.audioElement.currentTime = 0;
-    await this.audioElement.play();
-    return { ok: true, message: `Restarted: ${this.getFilename()}` };
+    try {
+      await this.audioElement.play();
+      return { ok: true, message: `Restarted: ${this.getFilename()}` };
+    } catch (error) {
+      return { ok: false, message: `Could not restart playback: ${error.message}` };
+    }
   }
 
   cleanupSource() {
@@ -186,6 +232,21 @@ export class AudioEngine {
     }
 
     this.sourceNode = null;
+  }
+
+  connectSourceToAnalyser() {
+    if (!this.sourceNode || !this.analyser) {
+      return;
+    }
+
+    try {
+      this.sourceNode.connect(this.analyser);
+    } catch (error) {
+      const message = String(error?.message || error).toLowerCase();
+      if (!message.includes('already')) {
+        throw error;
+      }
+    }
   }
 
   processFrame() {
@@ -335,6 +396,10 @@ export class AudioEngine {
   }
 
   getFilename() {
+    if (this.currentLabel) {
+      return this.currentLabel;
+    }
+
     try {
       const url = new URL(this.audioElement.src);
       const chunks = url.pathname.split('/');

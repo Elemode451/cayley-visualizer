@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { AudioEngine } from './src/audio-engine.js';
 import { FreeGroupFlowerView } from './src/free-group-flower-view.js';
+import { HybridBridgeView } from './src/hybrid-bridge-view.js';
 import { clamp, smoothstep, TWO_PI } from './src/math-utils.js';
 import { OriginalTorusView } from './src/original-torus-view.js';
 
@@ -12,12 +13,21 @@ const CHARACTER_COUNT = 72;
 const PARTICLE_COUNT = 260;
 const MAJOR_RADIUS = 4.5;
 const TUBE_RADIUS = 1.35;
+const FREE_GROUP_BASE_GENERATORS = ['a', 'b'];
+const FREE_GROUP_VECTOR_DIMENSIONS = 3;
+const MODE_CONFIG = [
+  { id: 'original', label: 'Original Torus', button: 'Switch To Free-Group Flower' },
+  { id: 'flower', label: 'Free-Group Flower', button: 'Switch To Hybrid Links' },
+  { id: 'hybrid', label: 'Hybrid Linked Torus', button: 'Switch To Free Pulse Form' },
+  { id: 'free', label: 'Free Pulse Form', button: 'Switch To Original Torus' },
+];
 
 const bgCanvas = document.getElementById('bgWave');
 const viewCanvas = document.getElementById('view');
 const flatCanvas = document.getElementById('flatView');
-const micBtn = document.getElementById('micBtn');
 const audioFileInput = document.getElementById('audioFile');
+const youtubeUrlInput = document.getElementById('youtubeUrlInput');
+const loadYoutubeBtn = document.getElementById('loadYoutubeBtn');
 const playPauseBtn = document.getElementById('playPauseBtn');
 const restartBtn = document.getElementById('restartBtn');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
@@ -45,7 +55,7 @@ const uiState = {
   excitement: 0,
   morph: 0,
   modeLabel: '2D Characters',
-  useFreeTorus: false,
+  modeIndex: 0,
 };
 
 const audio = new AudioEngine({
@@ -66,15 +76,16 @@ const renderer = new THREE.WebGLRenderer({
   canvas: viewCanvas,
   antialias: true,
   alpha: true,
+  powerPreference: 'high-performance',
 });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.07;
-controls.minDistance = 6;
-controls.maxDistance = 16;
+controls.minDistance = 4;
+controls.maxDistance = 36;
 controls.maxPolarAngle = Math.PI * 0.84;
 
 scene.add(new THREE.AmbientLight(0xb8d8ff, 0.5));
@@ -99,22 +110,27 @@ const freeFlowerTorus = new FreeGroupFlowerView({
   majorRadius: MAJOR_RADIUS,
   tubeRadius: TUBE_RADIUS,
   maxDepth: 8,
+  baseGenerators: FREE_GROUP_BASE_GENERATORS,
+  vectorDimensions: FREE_GROUP_VECTOR_DIMENSIONS,
+});
+
+const hybridBridge = new HybridBridgeView({
+  scene,
+  maxLinks: 2600,
 });
 
 setCanvasSize();
 window.addEventListener('resize', setCanvasSize);
+window.addEventListener('error', (event) => {
+  setStatus(`Runtime error: ${event.error?.message || event.message}`);
+});
+window.addEventListener('unhandledrejection', (event) => {
+  const message = event?.reason?.message || String(event?.reason || 'unknown error');
+  setStatus(`Async error: ${message}`);
+});
 updateTorusToggleUI();
 updateBlendState();
 updateStats(audio.getFrame());
-
-micBtn.addEventListener('click', async () => {
-  const result = await audio.startMic(Number(gainSlider.value));
-  if (result.ok) {
-    playPauseBtn.disabled = true;
-    restartBtn.disabled = true;
-  }
-  setStatus(result.message);
-});
 
 audioFileInput.addEventListener('change', async (event) => {
   const file = event.target.files?.[0];
@@ -127,6 +143,52 @@ audioFileInput.addEventListener('change', async (event) => {
     restartBtn.disabled = false;
   }
   setStatus(result.message);
+});
+
+loadYoutubeBtn?.addEventListener('click', async () => {
+  const rawUrl = (youtubeUrlInput?.value || '').trim();
+  if (!rawUrl) {
+    setStatus('Paste a YouTube URL first.');
+    return;
+  }
+
+  loadYoutubeBtn.disabled = true;
+  setStatus('Resolving YouTube stream...');
+
+  try {
+    const response = await fetch('/api/youtube', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: rawUrl }),
+    });
+
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const message = payload?.error || `YouTube load failed (${response.status}).`;
+      setStatus(message);
+      return;
+    }
+
+    const result = await audio.loadUrl(payload.streamUrl, Number(gainSlider.value), payload.title || 'YouTube Stream');
+    if (result.ok) {
+      playPauseBtn.disabled = false;
+      restartBtn.disabled = false;
+    }
+    setStatus(result.message);
+  } catch (error) {
+    setStatus(
+      `YouTube load failed: ${error.message}. If you are using python http.server, run this app with node server.mjs instead.`
+    );
+  } finally {
+    loadYoutubeBtn.disabled = false;
+  }
+});
+
+youtubeUrlInput?.addEventListener('keydown', (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    loadYoutubeBtn?.click();
+  }
 });
 
 playPauseBtn.addEventListener('click', async () => {
@@ -144,15 +206,15 @@ gainSlider.addEventListener('input', () => {
 });
 
 function toggleTorusMode() {
-  uiState.useFreeTorus = !uiState.useFreeTorus;
-  if (uiState.useFreeTorus) {
-    // Make the switch visually obvious immediately.
+  uiState.modeIndex = (uiState.modeIndex + 1) % MODE_CONFIG.length;
+  const mode = getActiveMode();
+
+  if (mode.id !== 'original') {
     uiState.excitement = Math.max(uiState.excitement, Number(morphSlider.value) + 0.35);
     uiState.morph = Math.max(uiState.morph, 0.9);
-    setStatus('3D mode: Free-Group Flower');
-  } else {
-    setStatus('3D mode: Original Torus');
   }
+
+  setStatus(`3D mode: ${mode.label}`);
   updateTorusToggleUI();
 }
 
@@ -227,6 +289,7 @@ animate();
 function animate() {
   requestAnimationFrame(animate);
   const elapsed = clock.getElapsedTime();
+  const activeMode = getActiveMode();
 
   const hasFrame = audio.processFrame();
   if (!hasFrame) {
@@ -246,13 +309,36 @@ function animate() {
   updateModeLabel();
   updateBlendState();
 
-  originalTorus.update(elapsed, {
-    heightScale: Number(heightSlider.value),
-    centroidHz: frame.centroidHz,
-    bassEnergy: frame.bassEnergy,
-    beatPulse: frame.beatPulse,
-  });
-  freeFlowerTorus.update(elapsed, frame, uiState.useFreeTorus);
+  const needsOriginal = activeMode.id === 'original' || activeMode.id === 'hybrid';
+  const needsFlower = activeMode.id !== 'original';
+
+  if (needsOriginal) {
+    originalTorus.update(elapsed, {
+      heightScale: Number(heightSlider.value),
+      centroidHz: frame.centroidHz,
+      bassEnergy: frame.bassEnergy,
+      beatPulse: frame.beatPulse,
+    });
+  }
+
+  if (needsFlower) {
+    const formMode = activeMode.id === 'hybrid' ? 'hybrid' : activeMode.id === 'free' ? 'free' : 'projected';
+    freeFlowerTorus.update(elapsed, frame, {
+      active: true,
+      formMode,
+    });
+  }
+
+  if (activeMode.id === 'hybrid') {
+    const bridgeAlpha = clamp(0.2 + uiState.morph * 0.8, 0, 1);
+    hybridBridge.update({
+      originalTorus,
+      freeFlower: freeFlowerTorus,
+      frame,
+      elapsed,
+      alpha: bridgeAlpha,
+    });
+  }
 
   drawBackgroundWave(elapsed, frame);
   drawCharacterWheel(elapsed, frame);
@@ -274,43 +360,41 @@ function updateMorphState() {
 }
 
 function updateModeLabel() {
+  const mode = getActiveMode();
   if (uiState.morph < 0.28) {
-    uiState.modeLabel = uiState.useFreeTorus ? '2D (Flower Selected)' : '2D (Original Selected)';
+    uiState.modeLabel = `2D (${mode.label} Selected)`;
     return;
   }
 
   if (uiState.morph < 0.78) {
-    uiState.modeLabel = 'Hybrid';
+    uiState.modeLabel = `Hybrid (${mode.label})`;
     return;
   }
 
-  if (uiState.useFreeTorus) {
-    uiState.modeLabel = '3D Free-Group Flower';
-  } else {
-    uiState.modeLabel = '3D Cayley Torus';
-  }
+  uiState.modeLabel = `3D ${mode.label}`;
 }
 
 function updateBlendState() {
-  const blend = uiState.useFreeTorus ? 1 : 0;
+  const mode = getActiveMode();
   const threeOpacity = clamp(0.18 + uiState.morph * 0.82, 0, 1);
   const flatOpacity = clamp(1 - uiState.morph * 0.9, 0.08, 1);
 
   viewCanvas.style.opacity = threeOpacity.toFixed(3);
   flatCanvas.style.opacity = flatOpacity.toFixed(3);
 
-  originalTorus.setBlend(threeOpacity * (1 - blend));
-  freeFlowerTorus.setBlend(threeOpacity * blend);
+  const originalBlend = mode.id === 'original' ? threeOpacity : mode.id === 'hybrid' ? threeOpacity * 0.88 : 0;
+  const flowerBlend = mode.id === 'original' ? 0 : mode.id === 'hybrid' ? threeOpacity * 0.95 : threeOpacity;
+  const bridgeBlend = mode.id === 'hybrid' ? threeOpacity : 0;
+
+  originalTorus.setBlend(originalBlend);
+  freeFlowerTorus.setBlend(flowerBlend);
+  hybridBridge.setBlend(bridgeBlend);
 }
 
 function updateTorusToggleUI() {
-  if (uiState.useFreeTorus) {
-    torusToggleState.textContent = 'Free-Group Flower Active';
-    torusToggleBtn.textContent = 'Switch To Original Torus';
-  } else {
-    torusToggleState.textContent = 'Original Torus Active';
-    torusToggleBtn.textContent = 'Switch To Free-Group Flower';
-  }
+  const mode = getActiveMode();
+  torusToggleState.textContent = `${mode.label} Active`;
+  torusToggleBtn.textContent = mode.button;
 }
 
 function drawCharacterWheel(elapsed, frame) {
@@ -468,6 +552,10 @@ function updateStats(frame) {
   }
 }
 
+function getActiveMode() {
+  return MODE_CONFIG[uiState.modeIndex] || MODE_CONFIG[0];
+}
+
 function setCanvasSize() {
   const wrap = viewCanvas.parentElement;
   const width = wrap.clientWidth;
@@ -476,7 +564,7 @@ function setCanvasSize() {
   camera.updateProjectionMatrix();
   renderer.setSize(width, height, false);
 
-  const dpr = Math.min(window.devicePixelRatio, 2);
+  const dpr = Math.min(window.devicePixelRatio, 1.5);
 
   bgCanvas.width = Math.max(1, Math.floor(window.innerWidth * dpr));
   bgCanvas.height = Math.max(1, Math.floor(window.innerHeight * dpr));

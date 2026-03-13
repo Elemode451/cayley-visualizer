@@ -86,7 +86,8 @@ code {
 }
 
 button,
-.file-btn {
+.file-btn,
+input[type='url'] {
   appearance: none;
   border: 1px solid rgba(255, 194, 122, 0.54);
   background: linear-gradient(180deg, rgba(255, 122, 24, 0.3), rgba(255, 122, 24, 0.1));
@@ -98,6 +99,16 @@ button,
   cursor: pointer;
   transition: transform 160ms ease, filter 160ms ease, border-color 160ms ease;
   text-align: center;
+}
+
+input[type='url'] {
+  text-transform: none;
+  font-weight: 600;
+  font-size: 0.82rem;
+}
+
+input[type='url']::placeholder {
+  color: rgba(255, 232, 207, 0.72);
 }
 
 button:hover,

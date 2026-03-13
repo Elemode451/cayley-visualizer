@@ -18,9 +18,10 @@
         </p>
 
         <div class="controls">
-          <button id="micBtn" type="button">Start Microphone</button>
           <label class="file-btn" for="audioFile">Load Audio File</label>
           <input id="audioFile" type="file" accept="audio/*" />
+          <input id="youtubeUrlInput" type="url" placeholder="YouTube URL" />
+          <button id="loadYoutubeBtn" type="button">Load YouTube Link</button>
           <button id="playPauseBtn" type="button" disabled>Play / Pause</button>
           <button id="restartBtn" type="button" disabled>Restart Song</button>
           <button id="fullscreenBtn" type="button">Fullscreen</button>
@@ -76,7 +77,7 @@
         <p id="status" class="status">Waiting for audio input.</p>
 
         <div class="alt-toggle">
-          <span class="alt-label">3D Torus Mode</span>
+          <span class="alt-label">3D Scene Mode</span>
           <div class="alt-row">
             <button id="torusToggleBtn" type="button">Switch To Free-Group Flower</button>
             <strong id="torusToggleState">Original Torus</strong>

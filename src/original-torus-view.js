@@ -16,6 +16,7 @@ export class OriginalTorusView {
     this.freqShift = 0;
     this.mirrorSign = 1;
     this.phaseRotor = 0;
+    this.normalUpdateCounter = 0;
 
     this.rootGroup = new THREE.Group();
     scene.add(this.rootGroup);
@@ -36,8 +37,12 @@ export class OriginalTorusView {
     }
 
     this.geometry = new THREE.BufferGeometry();
-    this.geometry.setAttribute('position', new THREE.BufferAttribute(this.torusPositions, 3));
-    this.geometry.setAttribute('color', new THREE.BufferAttribute(this.torusColors, 3));
+    const torusPositionAttr = new THREE.BufferAttribute(this.torusPositions, 3);
+    const torusColorAttr = new THREE.BufferAttribute(this.torusColors, 3);
+    torusPositionAttr.setUsage(THREE.DynamicDrawUsage);
+    torusColorAttr.setUsage(THREE.DynamicDrawUsage);
+    this.geometry.setAttribute('position', torusPositionAttr);
+    this.geometry.setAttribute('color', torusColorAttr);
     this.geometry.setIndex(torusIndices);
     this.geometry.computeVertexNormals();
 
@@ -79,8 +84,12 @@ export class OriginalTorusView {
     this.particlePositions = new Float32Array(particleCount * 3);
     this.particleColors = new Float32Array(particleCount * 3);
     this.particleGeometry = new THREE.BufferGeometry();
-    this.particleGeometry.setAttribute('position', new THREE.BufferAttribute(this.particlePositions, 3));
-    this.particleGeometry.setAttribute('color', new THREE.BufferAttribute(this.particleColors, 3));
+    const particlePositionAttr = new THREE.BufferAttribute(this.particlePositions, 3);
+    const particleColorAttr = new THREE.BufferAttribute(this.particleColors, 3);
+    particlePositionAttr.setUsage(THREE.DynamicDrawUsage);
+    particleColorAttr.setUsage(THREE.DynamicDrawUsage);
+    this.particleGeometry.setAttribute('position', particlePositionAttr);
+    this.particleGeometry.setAttribute('color', particleColorAttr);
     this.particles = [];
     for (let i = 0; i < particleCount; i += 1) {
       this.particles.push({
@@ -190,7 +199,10 @@ export class OriginalTorusView {
 
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.attributes.color.needsUpdate = true;
-    this.geometry.computeVertexNormals();
+    this.normalUpdateCounter = (this.normalUpdateCounter + 1) % 4;
+    if (this.normalUpdateCounter === 0 || beatPulse > 0.35) {
+      this.geometry.computeVertexNormals();
+    }
     this.updateParticles(elapsed, centroidNorm, beatPulse);
   }
 
@@ -249,5 +261,20 @@ export class OriginalTorusView {
 
   gridIndex(u, v) {
     return u * this.gridV + v;
+  }
+
+  sampleSurfacePointFromWorld(x, y, z, out = [0, 0, 0]) {
+    const theta = modulo(Math.atan2(y, x), TWO_PI);
+    const ring = Math.hypot(x, y) - this.majorRadius;
+    const phi = modulo(Math.atan2(z, ring), TWO_PI);
+
+    const u = Math.floor((theta / TWO_PI) * this.gridU) % this.gridU;
+    const v = Math.floor((phi / TWO_PI) * this.gridV) % this.gridV;
+    const offset = this.gridIndex(u, v) * 3;
+
+    out[0] = this.torusPositions[offset];
+    out[1] = this.torusPositions[offset + 1];
+    out[2] = this.torusPositions[offset + 2];
+    return out;
   }
 }
