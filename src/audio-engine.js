@@ -131,6 +131,7 @@ export class AudioEngine {
       this.audioElement.load();
       this.audioElement.pause();
       this.audioElement.currentTime = 0;
+      await this.waitForMediaReady(12000);
       this.currentLabel = file.name;
 
       if (!this.fileSourceNode) {
@@ -142,7 +143,9 @@ export class AudioEngine {
       this.audioMode = 'file';
       return { ok: true, message: `Loaded: ${file.name}. Press Play, Space, or K to start.` };
     } catch (error) {
-      return { ok: false, message: `File playback error: ${error.message}` };
+      this.audioMode = null;
+      this.currentLabel = '';
+      return { ok: false, message: `File playback error: ${error.message || 'unsupported/corrupt audio file'}` };
     }
   }
 
@@ -161,6 +164,7 @@ export class AudioEngine {
       this.audioElement.load();
       this.audioElement.pause();
       this.audioElement.currentTime = 0;
+      await this.waitForMediaReady(16000);
       this.currentLabel = label;
 
       if (!this.fileSourceNode) {
@@ -172,7 +176,9 @@ export class AudioEngine {
       this.audioMode = 'file';
       return { ok: true, message: `Loaded stream: ${label}. Press Play, Space, or K to start.` };
     } catch (error) {
-      return { ok: false, message: `URL playback error: ${error.message}` };
+      this.audioMode = null;
+      this.currentLabel = '';
+      return { ok: false, message: `URL playback error: ${error.message || 'stream unavailable or blocked'}` };
     }
   }
 
@@ -247,6 +253,55 @@ export class AudioEngine {
         throw error;
       }
     }
+  }
+
+  async waitForMediaReady(timeoutMs = 12000) {
+    if (this.audioElement.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      return;
+    }
+
+    await new Promise((resolve, reject) => {
+      let finished = false;
+      let timeoutId = null;
+
+      const done = (fn, value) => {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        this.audioElement.removeEventListener('loadedmetadata', onReady);
+        this.audioElement.removeEventListener('canplay', onReady);
+        this.audioElement.removeEventListener('error', onError);
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+        fn(value);
+      };
+
+      const onReady = () => done(resolve);
+      const onError = () => {
+        const code = this.audioElement.error?.code;
+        const reason =
+          code === 1
+            ? 'load aborted'
+            : code === 2
+              ? 'network error'
+              : code === 3
+                ? 'decode error'
+                : code === 4
+                  ? 'unsupported format/source'
+                  : 'unknown media error';
+        done(reject, new Error(reason));
+      };
+
+      this.audioElement.addEventListener('loadedmetadata', onReady, { once: true });
+      this.audioElement.addEventListener('canplay', onReady, { once: true });
+      this.audioElement.addEventListener('error', onError, { once: true });
+
+      timeoutId = setTimeout(() => {
+        done(reject, new Error('timed out while loading audio'));
+      }, timeoutMs);
+    });
   }
 
   processFrame() {

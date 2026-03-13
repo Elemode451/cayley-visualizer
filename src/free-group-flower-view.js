@@ -23,6 +23,7 @@ export class FreeGroupFlowerView {
     this.nodes = [];
     this.nodesByDepth = [];
     this.nodeWorld = new Float32Array(this.maxNodes * 3);
+    this.nodeColor = new Float32Array(this.maxNodes * 3);
     this.activeNodeIds = new Uint32Array(this.maxNodes);
     this.activeNodeCount = 0;
 
@@ -90,6 +91,7 @@ export class FreeGroupFlowerView {
   update(elapsed, frame, options = {}) {
     const active = Boolean(options.active);
     const formMode = options.formMode || 'projected';
+    const hueBlend = clamp(Number(options.hueBlend || 0), 0, 1);
     const freeze = Boolean(options.freeze);
     if (freeze) {
       return;
@@ -119,7 +121,7 @@ export class FreeGroupFlowerView {
     const scale = 0.92 + clamp(this.growth / this.maxDepth, 0, 1) * 0.48;
     this.group.scale.setScalar(scale);
 
-    this.rebuildGeometry(desiredDepth, elapsed, frame, formMode);
+    this.rebuildGeometry(desiredDepth, elapsed, frame, formMode, hueBlend);
   }
 
   setBlend(alpha) {
@@ -172,7 +174,7 @@ export class FreeGroupFlowerView {
     this.builtDepth = nextDepth;
   }
 
-  rebuildGeometry(activeDepth, elapsed, frame, formMode) {
+  rebuildGeometry(activeDepth, elapsed, frame, formMode, hueBlend) {
     let pointCount = 0;
     let edgeCount = 0;
 
@@ -182,11 +184,29 @@ export class FreeGroupFlowerView {
         continue;
       }
 
-      const { x, y, z, r, g, b } = this.projectNode(node, elapsed, frame, formMode);
+      const { x, y, z, r: rawR, g: rawG, b: rawB } = this.projectNode(node, elapsed, frame, formMode);
+      let r = rawR;
+      let g = rawG;
+      let b = rawB;
+
+      if (hueBlend > 0 && node.parent >= 0) {
+        const parentOffset = node.parent * 3;
+        const pr = this.nodeColor[parentOffset];
+        const pg = this.nodeColor[parentOffset + 1];
+        const pb = this.nodeColor[parentOffset + 2];
+        const childMix = 1 - hueBlend;
+        r = r * childMix + pr * hueBlend;
+        g = g * childMix + pg * hueBlend;
+        b = b * childMix + pb * hueBlend;
+      }
+
       const worldOffset = i * 3;
       this.nodeWorld[worldOffset] = x;
       this.nodeWorld[worldOffset + 1] = y;
       this.nodeWorld[worldOffset + 2] = z;
+      this.nodeColor[worldOffset] = r;
+      this.nodeColor[worldOffset + 1] = g;
+      this.nodeColor[worldOffset + 2] = b;
       this.activeNodeIds[pointCount] = i;
 
       const pointOffset = pointCount * 3;
@@ -248,18 +268,29 @@ export class FreeGroupFlowerView {
       extraCount += node.counts[i] * (i + 1);
     }
 
-    const theta =
-      (TWO_PI * modulo(count0, this.loopU)) / this.loopU +
-      elapsed * 0.13 +
-      node.seed * 0.9 +
-      depthNorm * 0.6 +
-      extraCount * 0.27;
-    const phi =
-      (TWO_PI * modulo(count1 + extraCount, this.loopV)) / this.loopV -
-      elapsed * 0.09 +
-      node.seed * 0.7 +
-      Math.sin(elapsed * 0.4 + node.seed * 3) * 0.15 +
-      extraCount * 0.19;
+    let theta;
+    let phi;
+    if (formMode === 'projected') {
+      theta = (TWO_PI * modulo(count0, this.loopU)) / this.loopU + elapsed * 0.13 + node.seed * 0.9 + depthNorm * 0.6;
+      phi =
+        (TWO_PI * modulo(count1, this.loopV)) / this.loopV -
+        elapsed * 0.09 +
+        node.seed * 0.7 +
+        Math.sin(elapsed * 0.4 + node.seed * 3) * 0.15;
+    } else {
+      theta =
+        (TWO_PI * modulo(count0, this.loopU)) / this.loopU +
+        elapsed * 0.13 +
+        node.seed * 0.9 +
+        depthNorm * 0.6 +
+        extraCount * 0.27;
+      phi =
+        (TWO_PI * modulo(count1 + extraCount, this.loopV)) / this.loopV -
+        elapsed * 0.09 +
+        node.seed * 0.7 +
+        Math.sin(elapsed * 0.4 + node.seed * 3) * 0.15 +
+        extraCount * 0.19;
+    }
 
     const blossom =
       depthNorm * (0.58 + frame.bassEnergy * 1.7) +
@@ -307,7 +338,10 @@ export class FreeGroupFlowerView {
     const y = treeY * (1 - torusProjection) + torusY * torusProjection;
     const z = treeZ * (1 - torusProjection) + torusZ * torusProjection;
 
-    const hue = modulo(0.03 + depthNorm * 0.58 + bandPhase / TWO_PI + node.seed * 0.1 + extraCount * 0.03, 1);
+    const hue =
+      formMode === 'projected'
+        ? modulo(0.03 + depthNorm * 0.58 + bandPhase / TWO_PI + node.seed * 0.1, 1)
+        : modulo(0.03 + depthNorm * 0.58 + bandPhase / TWO_PI + node.seed * 0.1 + extraCount * 0.03, 1);
     const light = clamp(0.24 + bandAmp * 0.62 + frame.beatPulse * 0.2 + depthNorm * 0.08, 0, 1);
     const [r, g, b] = hslToRgb(hue, 0.82, light);
     return { x, y, z, r, g, b };
@@ -328,7 +362,7 @@ export class FreeGroupFlowerView {
     let z = base[2];
 
     const twist = Math.sin(parentSeed * 19.7 + depth * 1.73) * 0.28;
-    x += twist * 0.45;
+    x += twist * 0.7;
     y += Math.cos(parentSeed * 23.1 + depth * 1.41) * 0.24;
     z += Math.sin(parentSeed * 17.3 + depth * 1.29) * 0.26;
 

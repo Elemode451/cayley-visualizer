@@ -16,7 +16,6 @@ export class OriginalTorusView {
     this.freqShift = 0;
     this.mirrorSign = 1;
     this.phaseRotor = 0;
-    this.normalUpdateCounter = 0;
 
     this.rootGroup = new THREE.Group();
     scene.add(this.rootGroup);
@@ -199,10 +198,7 @@ export class OriginalTorusView {
 
     this.geometry.attributes.position.needsUpdate = true;
     this.geometry.attributes.color.needsUpdate = true;
-    this.normalUpdateCounter = (this.normalUpdateCounter + 1) % 4;
-    if (this.normalUpdateCounter === 0 || beatPulse > 0.35) {
-      this.geometry.computeVertexNormals();
-    }
+    this.geometry.computeVertexNormals();
     this.updateParticles(elapsed, centroidNorm, beatPulse);
   }
 

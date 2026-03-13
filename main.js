@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { AudioEngine } from './src/audio-engine.js';
+import { FourierImageView } from './src/fourier-image-view.js';
 import { FreeGroupFlowerView } from './src/free-group-flower-view.js';
-import { HybridBridgeView } from './src/hybrid-bridge-view.js';
 import { clamp, smoothstep, TWO_PI } from './src/math-utils.js';
 import { OriginalTorusView } from './src/original-torus-view.js';
 
@@ -17,9 +17,8 @@ const FREE_GROUP_BASE_GENERATORS = ['a', 'b'];
 const FREE_GROUP_VECTOR_DIMENSIONS = 3;
 const MODE_CONFIG = [
   { id: 'original', label: 'Original Torus', button: 'Switch To Free-Group Flower' },
-  { id: 'flower', label: 'Free-Group Flower', button: 'Switch To Hybrid Links' },
-  { id: 'hybrid', label: 'Hybrid Linked Torus', button: 'Switch To Free Pulse Form' },
-  { id: 'free', label: 'Free Pulse Form', button: 'Switch To Original Torus' },
+  { id: 'flower', label: 'Free-Group Flower', button: 'Switch To Fourier Image Waves' },
+  { id: 'image', label: 'Fourier Image Waves', button: 'Switch To Original Torus' },
 ];
 
 const bgCanvas = document.getElementById('bgWave');
@@ -36,6 +35,8 @@ const diffusionSlider = document.getElementById('diffusionSlider');
 const heightSlider = document.getElementById('heightSlider');
 const morphSlider = document.getElementById('morphSlider');
 const bgWaveOpacitySlider = document.getElementById('bgWaveOpacitySlider');
+const bgWaveEnabled = document.getElementById('bgWaveEnabled');
+const flowerHueBlendSlider = document.getElementById('flowerHueBlendSlider');
 const torusToggleBtn = document.getElementById('torusToggleBtn');
 const torusToggleState = document.getElementById('torusToggleState');
 const statusEl = document.getElementById('status');
@@ -56,6 +57,8 @@ const uiState = {
   morph: 0,
   modeLabel: '2D Characters',
   modeIndex: 0,
+  bgWaveEnabled: Boolean(bgWaveEnabled?.checked ?? true),
+  bgWaveCleared: false,
 };
 
 const audio = new AudioEngine({
@@ -76,9 +79,8 @@ const renderer = new THREE.WebGLRenderer({
   canvas: viewCanvas,
   antialias: true,
   alpha: true,
-  powerPreference: 'high-performance',
 });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -114,9 +116,12 @@ const freeFlowerTorus = new FreeGroupFlowerView({
   vectorDimensions: FREE_GROUP_VECTOR_DIMENSIONS,
 });
 
-const hybridBridge = new HybridBridgeView({
+const fourierImageView = new FourierImageView({
   scene,
-  maxLinks: 2600,
+  bands: GRID_V,
+  columns: 560,
+  width: 8.2,
+  height: 4.9,
 });
 
 setCanvasSize();
@@ -137,11 +142,23 @@ audioFileInput.addEventListener('change', async (event) => {
   if (!file) {
     return;
   }
+  setStatus(`Loading file: ${file.name}...`);
   const result = await audio.loadFile(file, Number(gainSlider.value));
   if (result.ok) {
     playPauseBtn.disabled = false;
     restartBtn.disabled = false;
+    setStatus(`${result.message} Building Fourier image...`);
+    try {
+      await fourierImageView.loadSongImageFromFile(file, audio.audioContext);
+      setStatus(`${result.message} Fourier image ready.`);
+    } catch (error) {
+      fourierImageView.clearStaticImage();
+      const reason = error?.message || 'image extraction failed';
+      setStatus(`${result.message} (Fourier image fallback to live mode: ${reason})`);
+    }
+    return;
   }
+  fourierImageView.clearStaticImage();
   setStatus(result.message);
 });
 
@@ -173,6 +190,7 @@ loadYoutubeBtn?.addEventListener('click', async () => {
     if (result.ok) {
       playPauseBtn.disabled = false;
       restartBtn.disabled = false;
+      fourierImageView.clearStaticImage();
     }
     setStatus(result.message);
   } catch (error) {
@@ -203,6 +221,13 @@ restartBtn.addEventListener('click', async () => {
 
 gainSlider.addEventListener('input', () => {
   audio.setGain(Number(gainSlider.value));
+});
+
+bgWaveEnabled?.addEventListener('change', () => {
+  uiState.bgWaveEnabled = Boolean(bgWaveEnabled.checked);
+  if (uiState.bgWaveEnabled) {
+    uiState.bgWaveCleared = false;
+  }
 });
 
 function toggleTorusMode() {
@@ -280,7 +305,18 @@ audioPlayer.addEventListener('pause', () => {
 });
 
 audioPlayer.addEventListener('error', () => {
-  setStatus('Audio file could not be decoded by the browser.');
+  const code = audioPlayer.error?.code;
+  const codeLabel =
+    code === 1
+      ? 'aborted'
+      : code === 2
+        ? 'network error'
+        : code === 3
+          ? 'decode error'
+          : code === 4
+            ? 'unsupported format/source'
+            : 'unknown media error';
+  setStatus(`Audio load/playback failed (${codeLabel}). Try MP3/WAV, or re-export the file.`);
 });
 
 const clock = new THREE.Clock();
@@ -300,8 +336,10 @@ function animate() {
   const frame = audio.getFrame();
 
   if (hasFrame) {
-    originalTorus.ingestFrame(frame);
-    originalTorus.diffuse(Number(diffusionSlider.value), frame.bassEnergy);
+    if (activeMode.id === 'original') {
+      originalTorus.ingestFrame(frame);
+      originalTorus.diffuse(Number(diffusionSlider.value), frame.bassEnergy);
+    }
     updateExcitement(frame);
   }
 
@@ -309,8 +347,9 @@ function animate() {
   updateModeLabel();
   updateBlendState();
 
-  const needsOriginal = activeMode.id === 'original' || activeMode.id === 'hybrid';
-  const needsFlower = activeMode.id !== 'original';
+  const needsOriginal = activeMode.id === 'original';
+  const needsFlower = activeMode.id === 'flower';
+  const needsImage = activeMode.id === 'image';
 
   if (needsOriginal) {
     originalTorus.update(elapsed, {
@@ -322,25 +361,28 @@ function animate() {
   }
 
   if (needsFlower) {
-    const formMode = activeMode.id === 'hybrid' ? 'hybrid' : activeMode.id === 'free' ? 'free' : 'projected';
     freeFlowerTorus.update(elapsed, frame, {
       active: true,
-      formMode,
+      formMode: 'projected',
+      hueBlend: Number(flowerHueBlendSlider?.value || 0),
     });
   }
 
-  if (activeMode.id === 'hybrid') {
-    const bridgeAlpha = clamp(0.2 + uiState.morph * 0.8, 0, 1);
-    hybridBridge.update({
-      originalTorus,
-      freeFlower: freeFlowerTorus,
-      frame,
-      elapsed,
-      alpha: bridgeAlpha,
-    });
+  if (needsImage) {
+    fourierImageView.update(elapsed, frame, true);
   }
 
-  drawBackgroundWave(elapsed, frame);
+  if (uiState.bgWaveEnabled) {
+    drawBackgroundWave(elapsed, frame);
+    uiState.bgWaveCleared = false;
+  } else if (!uiState.bgWaveCleared) {
+    if (bgCtx) {
+      bgCtx.fillStyle = 'rgba(2, 4, 6, 1)';
+      bgCtx.fillRect(0, 0, bgCanvas.clientWidth, bgCanvas.clientHeight);
+    }
+    uiState.bgWaveCleared = true;
+  }
+
   drawCharacterWheel(elapsed, frame);
   updateStats(frame);
 
@@ -367,7 +409,7 @@ function updateModeLabel() {
   }
 
   if (uiState.morph < 0.78) {
-    uiState.modeLabel = `Hybrid (${mode.label})`;
+    uiState.modeLabel = `Morph (${mode.label})`;
     return;
   }
 
@@ -382,13 +424,13 @@ function updateBlendState() {
   viewCanvas.style.opacity = threeOpacity.toFixed(3);
   flatCanvas.style.opacity = flatOpacity.toFixed(3);
 
-  const originalBlend = mode.id === 'original' ? threeOpacity : mode.id === 'hybrid' ? threeOpacity * 0.88 : 0;
-  const flowerBlend = mode.id === 'original' ? 0 : mode.id === 'hybrid' ? threeOpacity * 0.95 : threeOpacity;
-  const bridgeBlend = mode.id === 'hybrid' ? threeOpacity : 0;
+  const originalBlend = mode.id === 'original' ? threeOpacity : 0;
+  const flowerBlend = mode.id === 'flower' ? threeOpacity : 0;
+  const imageBlend = mode.id === 'image' ? threeOpacity : 0;
 
   originalTorus.setBlend(originalBlend);
   freeFlowerTorus.setBlend(flowerBlend);
-  hybridBridge.setBlend(bridgeBlend);
+  fourierImageView.setBlend(imageBlend);
 }
 
 function updateTorusToggleUI() {
@@ -564,7 +606,7 @@ function setCanvasSize() {
   camera.updateProjectionMatrix();
   renderer.setSize(width, height, false);
 
-  const dpr = Math.min(window.devicePixelRatio, 1.5);
+  const dpr = Math.min(window.devicePixelRatio, 2);
 
   bgCanvas.width = Math.max(1, Math.floor(window.innerWidth * dpr));
   bgCanvas.height = Math.max(1, Math.floor(window.innerHeight * dpr));

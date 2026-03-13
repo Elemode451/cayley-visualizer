@@ -47,11 +47,12 @@ npm start
 - `Height Scale`: amplitude-to-geometry displacement.
 - `3D Threshold`: excitement level where the scene moves from 2D toward 3D.
 - `BG Wave Opacity`: controls the faded waveform intensity on the black background.
-- `3D Scene Mode`: cycles through:
+- `Background Wave Enabled`: toggles background waveform rendering and computation.
+- `Flower Hue Blend`: blends free-group branch colors (0 = current sharp hues, 1 = smooth parent-child blending).
+- `3D Scene Mode`: toggles between:
   - Original Torus
   - Free-Group Flower
-  - Hybrid Linked Torus (flower nodes connect to torus surface)
-  - Free Pulse Form (unprojected free-group oscillation)
+  - Fourier Image Waves
 
 ## Visual Mapping
 
@@ -86,6 +87,7 @@ The code is organized into modules under `src/`:
 - `audio-engine.js` for audio input and FFT feature extraction.
 - `original-torus-view.js` for the Cayley torus mesh.
 - `free-group-flower-view.js` for the free-group growth projection on a torus.
+- `fourier-image-view.js` for FFT image mode with propagating waves.
 - `fft-utils.js` and `math-utils.js` for reusable math helpers.
 
 ## Free-Group Generator Config
