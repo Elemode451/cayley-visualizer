@@ -50,6 +50,7 @@ npm start
 - `Diffusion`: controls neighbor energy spread on the graph.
 - `Height Scale`: amplitude-to-geometry displacement.
 - `3D Threshold`: excitement level where the scene moves from 2D toward 3D.
+- `Flower Projection`: morphs the free-group flower from the current inner torus projection toward an outward-bending asymmetric shell (`1.0` keeps the torus baseline).
 - `BG Wave Opacity`: controls the faded waveform intensity on the black background.
 - `Background Wave Enabled`: toggles background waveform rendering and computation.
 - `Flower Hue Blend`: blends free-group branch colors (0 = current sharp hues, 1 = smooth parent-child blending).

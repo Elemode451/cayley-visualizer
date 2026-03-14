@@ -92,6 +92,7 @@ export class FreeGroupFlowerView {
     const active = Boolean(options.active);
     const formMode = options.formMode || 'projected';
     const hueBlend = clamp(Number(options.hueBlend || 0), 0, 1);
+    const spread = Math.max(0.2, Number(options.spread || 1));
     const freeze = Boolean(options.freeze);
     if (freeze) {
       return;
@@ -121,7 +122,7 @@ export class FreeGroupFlowerView {
     const scale = 0.92 + clamp(this.growth / this.maxDepth, 0, 1) * 0.48;
     this.group.scale.setScalar(scale);
 
-    this.rebuildGeometry(desiredDepth, elapsed, frame, formMode, hueBlend);
+    this.rebuildGeometry(desiredDepth, elapsed, frame, formMode, hueBlend, spread);
   }
 
   setBlend(alpha) {
@@ -174,7 +175,7 @@ export class FreeGroupFlowerView {
     this.builtDepth = nextDepth;
   }
 
-  rebuildGeometry(activeDepth, elapsed, frame, formMode, hueBlend) {
+  rebuildGeometry(activeDepth, elapsed, frame, formMode, hueBlend, spread) {
     let pointCount = 0;
     let edgeCount = 0;
 
@@ -184,7 +185,7 @@ export class FreeGroupFlowerView {
         continue;
       }
 
-      const { x, y, z, r: rawR, g: rawG, b: rawB } = this.projectNode(node, elapsed, frame, formMode);
+      const { x, y, z, r: rawR, g: rawG, b: rawB } = this.projectNode(node, elapsed, frame, formMode, spread);
       let r = rawR;
       let g = rawG;
       let b = rawB;
@@ -254,7 +255,7 @@ export class FreeGroupFlowerView {
     this.activeNodeCount = pointCount;
   }
 
-  projectNode(node, elapsed, frame, formMode) {
+  projectNode(node, elapsed, frame, formMode, spread) {
     const depthNorm = node.depth / Math.max(1, this.maxDepth);
     const bandCount = frame.bandAmpSmooth.length;
     const bandIndex = Math.min(bandCount - 1, Math.floor(depthNorm * (bandCount - 1)));
@@ -334,9 +335,54 @@ export class FreeGroupFlowerView {
       treeZ += pulseZ;
     }
 
-    const x = treeX * (1 - torusProjection) + torusX * torusProjection;
-    const y = treeY * (1 - torusProjection) + torusY * torusProjection;
-    const z = treeZ * (1 - torusProjection) + torusZ * torusProjection;
+    const spreadScale = 0.92 + spread * 0.08;
+    const spreadX = treeX * spreadScale;
+    const spreadY = treeY * spreadScale;
+    const spreadZ = treeZ * spreadScale;
+
+    const shapeMorphBase = clamp((spread - 1) / 1.5, 0, 1);
+    const shapeMorph = shapeMorphBase * shapeMorphBase * (3 - 2 * shapeMorphBase);
+    const tighten = clamp((1 - spread) / 0.5, 0, 1);
+
+    const ringCenterX = this.majorRadius * Math.cos(theta);
+    const ringCenterY = this.majorRadius * Math.sin(theta);
+    const normalX = torusX - ringCenterX;
+    const normalY = torusY - ringCenterY;
+    const normalZ = torusZ;
+    const normalLength = Math.hypot(normalX, normalY, normalZ) || 1;
+    const unitNormalX = normalX / normalLength;
+    const unitNormalY = normalY / normalLength;
+    const unitNormalZ = normalZ / normalLength;
+
+    const sideBias = Math.max(0, Math.cos(theta - 0.35));
+    const bendBias = sideBias * sideBias;
+    const shellLift = shapeMorph * (0.45 + depthNorm * 1.2 + frame.bassEnergy * 0.7);
+    const shellFlare = shellLift * (0.45 + bendBias * 1.8);
+    const shellTwist = Math.sin(phi + node.seed * 4.2 + elapsed * 0.35) * shapeMorph * (0.12 + depthNorm * 0.45);
+
+    const shellX =
+      torusX +
+      unitNormalX * shellFlare +
+      Math.cos(theta) * shellLift * (0.35 + bendBias * 0.9) +
+      sideBias * shapeMorph * 1.15;
+    const shellY =
+      torusY +
+      unitNormalY * shellFlare +
+      Math.sin(theta) * shellLift * 0.28;
+    const shellZ =
+      torusZ +
+      unitNormalZ * shellFlare +
+      shellLift * (0.18 + bendBias * 0.7) +
+      shellTwist;
+
+    const projectionTargetX = torusX * (1 - shapeMorph) + shellX * shapeMorph;
+    const projectionTargetY = torusY * (1 - shapeMorph) + shellY * shapeMorph;
+    const projectionTargetZ = torusZ * (1 - shapeMorph) + shellZ * shapeMorph;
+    const projectionBlend = clamp(torusProjection + tighten * 0.22, 0, 1);
+
+    const x = spreadX * (1 - projectionBlend) + projectionTargetX * projectionBlend;
+    const y = spreadY * (1 - projectionBlend) + projectionTargetY * projectionBlend;
+    const z = spreadZ * (1 - projectionBlend) + projectionTargetZ * projectionBlend;
 
     const hue =
       formMode === 'projected'

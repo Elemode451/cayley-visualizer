@@ -43,6 +43,7 @@ const morphSlider = document.getElementById('morphSlider');
 const bgWaveOpacitySlider = document.getElementById('bgWaveOpacitySlider');
 const bgWaveEnabled = document.getElementById('bgWaveEnabled');
 const flowerHueBlendSlider = document.getElementById('flowerHueBlendSlider');
+const flowerSpreadSlider = document.getElementById('flowerSpreadSlider');
 const torusToggleBtn = document.getElementById('torusToggleBtn');
 const torusToggleState = document.getElementById('torusToggleState');
 const statusEl = document.getElementById('status');
@@ -389,6 +390,7 @@ function animate() {
       active: true,
       formMode: 'projected',
       hueBlend: Number(flowerHueBlendSlider?.value || 0),
+      spread: Number(flowerSpreadSlider?.value || 1),
     });
   }
 
