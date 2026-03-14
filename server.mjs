@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const ROOT = process.cwd();
 const PORT = Number(process.env.PORT || 5173);
+let ytDlpCandidatesPromise = null;
 
 const MIME = {
   '.css': 'text/css; charset=utf-8',
@@ -85,8 +86,8 @@ async function handleYoutube(req, res) {
     const details = shorten(String(error.message || error), 280);
     sendJson(res, 500, {
       error:
-        `yt-dlp failed: ${details}. Ensure yt-dlp is installed and updated (` +
-        `run: yt-dlp -U), and try again.`,
+        `yt-dlp failed: ${details}. Ensure yt-dlp is installed and current ` +
+        `(recommended: python -m pip install -U yt-dlp), and try again.`,
     });
   }
 }
@@ -121,16 +122,27 @@ async function readJsonBody(req) {
 }
 
 async function runYtDlp(args) {
-  const { stdout, stderr } = await execFileAsync('yt-dlp', args, {
-    timeout: 60000,
-    maxBuffer: 16 * 1024 * 1024,
-  });
+  const candidates = await getYtDlpCandidates();
+  let lastError = null;
 
-  if (!stdout?.trim()) {
-    throw new Error(stderr?.trim() || 'Empty yt-dlp output.');
+  for (const candidate of candidates) {
+    try {
+      const { stdout, stderr } = await execFileAsync(candidate.command, [...candidate.argsPrefix, ...args], {
+        timeout: 60000,
+        maxBuffer: 16 * 1024 * 1024,
+      });
+
+      if (!stdout?.trim()) {
+        throw new Error(stderr?.trim() || `Empty output from ${candidate.label}.`);
+      }
+
+      return stdout.trim();
+    } catch (error) {
+      lastError = new Error(`${candidate.label}: ${extractCommandError(error)}`);
+    }
   }
 
-  return stdout.trim();
+  throw lastError || new Error('No working yt-dlp command was found.');
 }
 
 async function resolveStreamUrl(sourceUrl) {
@@ -173,4 +185,81 @@ function shorten(text, maxLength) {
     return text;
   }
   return `${text.slice(0, maxLength - 3)}...`;
+}
+
+async function getYtDlpCandidates() {
+  if (!ytDlpCandidatesPromise) {
+    ytDlpCandidatesPromise = detectYtDlpCandidates().catch((error) => {
+      ytDlpCandidatesPromise = null;
+      throw error;
+    });
+  }
+  return ytDlpCandidatesPromise;
+}
+
+async function detectYtDlpCandidates() {
+  const candidates = [
+    { command: 'python', argsPrefix: ['-m', 'yt_dlp'], label: 'python -m yt_dlp', rank: 0 },
+    { command: 'yt-dlp', argsPrefix: [], label: 'yt-dlp', rank: 1 },
+  ];
+
+  const available = [];
+  for (const candidate of candidates) {
+    try {
+      const { stdout } = await execFileAsync(candidate.command, [...candidate.argsPrefix, '--version'], {
+        timeout: 15000,
+        maxBuffer: 1024 * 1024,
+      });
+      const version = stdout.trim();
+      if (version) {
+        available.push({ ...candidate, version });
+      }
+    } catch {
+      // Skip missing or broken candidate commands and keep probing others.
+    }
+  }
+
+  if (!available.length) {
+    throw new Error('No yt-dlp installation was found on PATH.');
+  }
+
+  available.sort((left, right) => {
+    const versionOrder = compareVersionStrings(right.version, left.version);
+    if (versionOrder !== 0) {
+      return versionOrder;
+    }
+    return left.rank - right.rank;
+  });
+
+  return available;
+}
+
+function compareVersionStrings(left, right) {
+  const leftParts = String(left)
+    .split(/[^0-9]+/)
+    .filter(Boolean)
+    .map(Number);
+  const rightParts = String(right)
+    .split(/[^0-9]+/)
+    .filter(Boolean)
+    .map(Number);
+  const length = Math.max(leftParts.length, rightParts.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const delta = (leftParts[index] || 0) - (rightParts[index] || 0);
+    if (delta !== 0) {
+      return delta;
+    }
+  }
+
+  return 0;
+}
+
+function extractCommandError(error) {
+  return (
+    error?.stderr?.trim() ||
+    error?.stdout?.trim() ||
+    error?.message?.trim() ||
+    'Unknown yt-dlp error.'
+  );
 }

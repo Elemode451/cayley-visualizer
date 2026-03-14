@@ -14,6 +14,7 @@ Real-time audio visualizer inspired by group theory and Fourier analysis:
 Because this uses ES modules in the browser, serve the folder with a local web server.
 
 For YouTube link loading, use the Node server mode (it exposes `/api/youtube` and calls `yt-dlp`).
+The server prefers `python -m yt_dlp` when available, which helps on systems where the `yt-dlp` executable on `PATH` is stale.
 
 ### Option A: Python
 
@@ -41,8 +42,11 @@ npm start
 
 - `Load Audio File`: choose a local file (manual play; looped once started).
 - `YouTube URL` + `Load YouTube Link`: resolves a YouTube link to a playable audio stream (requires Node server mode + `yt-dlp`).
+  If YouTube extraction breaks, update with `python -m pip install -U yt-dlp`.
 - `Play / Pause`: toggles file playback.
 - `Gain`: output gain.
+- `Viewport Preset`: choose `Phone Portrait 1080x1920` for a centered 9:16 stage that is easier to fullscreen-record for mobile.
+- `GPU Priority Mode`: requests the browser's high-performance WebGL path and disables the CPU-heavy 2D overlays so more of the frame budget goes to the GPU.
 - `Diffusion`: controls neighbor energy spread on the graph.
 - `Height Scale`: amplitude-to-geometry displacement.
 - `3D Threshold`: excitement level where the scene moves from 2D toward 3D.

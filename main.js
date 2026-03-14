@@ -15,6 +15,10 @@ const MAJOR_RADIUS = 4.5;
 const TUBE_RADIUS = 1.35;
 const FREE_GROUP_BASE_GENERATORS = ['a', 'b'];
 const FREE_GROUP_VECTOR_DIMENSIONS = 3;
+const VIEWPORT_PRESETS = [
+  { id: 'auto', label: 'Auto Fill', aspectRatio: null, renderWidth: null, renderHeight: null },
+  { id: 'phone-1080x1920', label: 'Phone Portrait 1080x1920', aspectRatio: 1080 / 1920, renderWidth: 1080, renderHeight: 1920 },
+];
 const MODE_CONFIG = [
   { id: 'original', label: 'Original Torus', button: 'Switch To Free-Group Flower' },
   { id: 'flower', label: 'Free-Group Flower', button: 'Switch To Fourier Image Waves' },
@@ -30,6 +34,8 @@ const loadYoutubeBtn = document.getElementById('loadYoutubeBtn');
 const playPauseBtn = document.getElementById('playPauseBtn');
 const restartBtn = document.getElementById('restartBtn');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
+const viewportPresetSelect = document.getElementById('viewportPreset');
+const gpuPriorityToggle = document.getElementById('gpuPriorityToggle');
 const gainSlider = document.getElementById('gainSlider');
 const diffusionSlider = document.getElementById('diffusionSlider');
 const heightSlider = document.getElementById('heightSlider');
@@ -57,8 +63,11 @@ const uiState = {
   morph: 0,
   modeLabel: '2D Characters',
   modeIndex: 0,
+  viewportPresetId: viewportPresetSelect?.value || 'auto',
+  gpuPriorityEnabled: Boolean(gpuPriorityToggle?.checked ?? false),
   bgWaveEnabled: Boolean(bgWaveEnabled?.checked ?? true),
   bgWaveCleared: false,
+  flatViewCleared: false,
 };
 
 const audio = new AudioEngine({
@@ -75,20 +84,8 @@ scene.fog = new THREE.Fog(0x071a1d, 8, 22);
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
 camera.position.set(0, -10, 5);
 
-const renderer = new THREE.WebGLRenderer({
-  canvas: viewCanvas,
-  antialias: true,
-  alpha: true,
-});
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-renderer.outputColorSpace = THREE.SRGBColorSpace;
-
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.07;
-controls.minDistance = 4;
-controls.maxDistance = 36;
-controls.maxPolarAngle = Math.PI * 0.84;
+let renderer = createRenderer(uiState.gpuPriorityEnabled ? 'high-performance' : 'default');
+let controls = createControls(renderer);
 
 scene.add(new THREE.AmbientLight(0xb8d8ff, 0.5));
 const keyLight = new THREE.DirectionalLight(0xffdcb3, 1.05);
@@ -230,6 +227,32 @@ bgWaveEnabled?.addEventListener('change', () => {
   }
 });
 
+viewportPresetSelect?.addEventListener('change', () => {
+  uiState.viewportPresetId = viewportPresetSelect.value;
+  setCanvasSize();
+  const preset = getViewportPreset();
+  setStatus(
+    preset.id === 'auto'
+      ? 'Viewport preset: Auto Fill.'
+      : `Viewport preset: ${preset.label}. Fullscreen keeps a centered 9:16 stage.`
+  );
+});
+
+gpuPriorityToggle?.addEventListener('change', async () => {
+  const enabled = Boolean(gpuPriorityToggle.checked);
+  gpuPriorityToggle.disabled = true;
+
+  try {
+    await setGpuPriorityMode(enabled);
+  } catch (error) {
+    uiState.gpuPriorityEnabled = !enabled;
+    gpuPriorityToggle.checked = uiState.gpuPriorityEnabled;
+    setStatus(`GPU Priority Mode failed: ${error?.message || error}`);
+  } finally {
+    gpuPriorityToggle.disabled = false;
+  }
+});
+
 function toggleTorusMode() {
   uiState.modeIndex = (uiState.modeIndex + 1) % MODE_CONFIG.length;
   const mode = getActiveMode();
@@ -267,6 +290,7 @@ document.addEventListener('keydown', async (event) => {
   const tag = target && target.tagName ? target.tagName.toUpperCase() : '';
   const editable =
     tag === 'INPUT' ||
+    tag === 'SELECT' ||
     tag === 'TEXTAREA' ||
     (target && target.isContentEditable) ||
     event.ctrlKey ||
@@ -373,17 +397,22 @@ function animate() {
   }
 
   if (uiState.bgWaveEnabled) {
-    drawBackgroundWave(elapsed, frame);
-    uiState.bgWaveCleared = false;
-  } else if (!uiState.bgWaveCleared) {
-    if (bgCtx) {
-      bgCtx.fillStyle = 'rgba(2, 4, 6, 1)';
-      bgCtx.fillRect(0, 0, bgCanvas.clientWidth, bgCanvas.clientHeight);
+    if (uiState.gpuPriorityEnabled) {
+      clearBackgroundWave();
+    } else {
+      drawBackgroundWave(elapsed, frame);
+      uiState.bgWaveCleared = false;
     }
-    uiState.bgWaveCleared = true;
+  } else if (!uiState.bgWaveCleared) {
+    clearBackgroundWave();
   }
 
-  drawCharacterWheel(elapsed, frame);
+  if (uiState.gpuPriorityEnabled) {
+    clearFlatView();
+  } else {
+    drawCharacterWheel(elapsed, frame);
+    uiState.flatViewCleared = false;
+  }
   updateStats(frame);
 
   controls.update();
@@ -418,11 +447,12 @@ function updateModeLabel() {
 
 function updateBlendState() {
   const mode = getActiveMode();
-  const threeOpacity = clamp(0.18 + uiState.morph * 0.82, 0, 1);
-  const flatOpacity = clamp(1 - uiState.morph * 0.9, 0.08, 1);
+  const threeOpacity = uiState.gpuPriorityEnabled ? 1 : clamp(0.18 + uiState.morph * 0.82, 0, 1);
+  const flatOpacity = uiState.gpuPriorityEnabled ? 0 : clamp(1 - uiState.morph * 0.9, 0.08, 1);
 
   viewCanvas.style.opacity = threeOpacity.toFixed(3);
   flatCanvas.style.opacity = flatOpacity.toFixed(3);
+  bgCanvas.style.opacity = uiState.gpuPriorityEnabled ? '0' : '1';
 
   const originalBlend = mode.id === 'original' ? threeOpacity : 0;
   const flowerBlend = mode.id === 'flower' ? threeOpacity : 0;
@@ -598,13 +628,77 @@ function getActiveMode() {
   return MODE_CONFIG[uiState.modeIndex] || MODE_CONFIG[0];
 }
 
+function createRenderer(powerPreference) {
+  const nextRenderer = new THREE.WebGLRenderer({
+    canvas: viewCanvas,
+    antialias: true,
+    alpha: true,
+    powerPreference,
+  });
+  nextRenderer.outputColorSpace = THREE.SRGBColorSpace;
+  return nextRenderer;
+}
+
+function createControls(nextRenderer) {
+  const nextControls = new OrbitControls(camera, nextRenderer.domElement);
+  nextControls.enableDamping = true;
+  nextControls.dampingFactor = 0.07;
+  nextControls.minDistance = 4;
+  nextControls.maxDistance = 36;
+  nextControls.maxPolarAngle = Math.PI * 0.84;
+  return nextControls;
+}
+
+async function setGpuPriorityMode(enabled) {
+  if (uiState.gpuPriorityEnabled === enabled) {
+    return;
+  }
+
+  uiState.gpuPriorityEnabled = enabled;
+  renderer = rebuildRenderer(enabled ? 'high-performance' : 'default');
+  controls = createControls(renderer);
+  setCanvasSize();
+  updateBlendState();
+
+  if (enabled) {
+    clearBackgroundWave();
+    clearFlatView();
+  }
+
+  setStatus(
+    enabled
+      ? 'GPU Priority Mode enabled. Browser requested high-performance WebGL and CPU-heavy 2D overlays were disabled.'
+      : 'GPU Priority Mode disabled. Restored the full mixed 2D/3D render path.'
+  );
+}
+
+function rebuildRenderer(powerPreference) {
+  const previousRenderer = renderer;
+  const previousControls = controls;
+  previousControls?.dispose();
+
+  if (previousRenderer) {
+    previousRenderer.dispose();
+  }
+
+  return createRenderer(powerPreference);
+}
+
 function setCanvasSize() {
   const wrap = viewCanvas.parentElement;
-  const width = wrap.clientWidth;
-  const height = wrap.clientHeight;
-  camera.aspect = width / height;
+  if (!wrap) {
+    return;
+  }
+
+  const wrapWidth = Math.max(1, wrap.clientWidth);
+  const wrapHeight = Math.max(1, wrap.clientHeight);
+  const stage = getViewportStage(wrapWidth, wrapHeight);
+  camera.aspect = stage.displayWidth / stage.displayHeight;
   camera.updateProjectionMatrix();
-  renderer.setSize(width, height, false);
+  renderer.setPixelRatio(1);
+  renderer.setSize(stage.renderWidth, stage.renderHeight, false);
+  applyCanvasStage(viewCanvas, stage);
+  applyCanvasStage(flatCanvas, stage);
 
   const dpr = Math.min(window.devicePixelRatio, 2);
 
@@ -618,13 +712,73 @@ function setCanvasSize() {
     bgCtx.fillRect(0, 0, window.innerWidth, window.innerHeight);
   }
 
-  flatCanvas.width = Math.max(1, Math.floor(width * dpr));
-  flatCanvas.height = Math.max(1, Math.floor(height * dpr));
-  flatCanvas.style.width = `${width}px`;
-  flatCanvas.style.height = `${height}px`;
+  flatCanvas.width = stage.renderWidth;
+  flatCanvas.height = stage.renderHeight;
   if (flatCtx) {
-    flatCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    flatCtx.setTransform(stage.renderWidth / stage.displayWidth, 0, 0, stage.renderHeight / stage.displayHeight, 0, 0);
   }
+}
+
+function getViewportPreset() {
+  return VIEWPORT_PRESETS.find((preset) => preset.id === uiState.viewportPresetId) || VIEWPORT_PRESETS[0];
+}
+
+function getViewportStage(boundsWidth, boundsHeight) {
+  const preset = getViewportPreset();
+  let displayWidth = boundsWidth;
+  let displayHeight = boundsHeight;
+
+  if (preset.aspectRatio) {
+    const boundsAspect = boundsWidth / boundsHeight;
+    if (boundsAspect > preset.aspectRatio) {
+      displayHeight = boundsHeight;
+      displayWidth = boundsHeight * preset.aspectRatio;
+    } else {
+      displayWidth = boundsWidth;
+      displayHeight = boundsWidth / preset.aspectRatio;
+    }
+  }
+
+  const clampedWidth = Math.max(1, Math.floor(displayWidth));
+  const clampedHeight = Math.max(1, Math.floor(displayHeight));
+  const dpr = Math.min(window.devicePixelRatio, 2);
+
+  return {
+    displayWidth: clampedWidth,
+    displayHeight: clampedHeight,
+    offsetLeft: Math.floor((boundsWidth - clampedWidth) * 0.5),
+    offsetTop: Math.floor((boundsHeight - clampedHeight) * 0.5),
+    renderWidth: preset.renderWidth || Math.max(1, Math.floor(clampedWidth * dpr)),
+    renderHeight: preset.renderHeight || Math.max(1, Math.floor(clampedHeight * dpr)),
+  };
+}
+
+function applyCanvasStage(canvas, stage) {
+  canvas.style.width = `${stage.displayWidth}px`;
+  canvas.style.height = `${stage.displayHeight}px`;
+  canvas.style.left = `${stage.offsetLeft}px`;
+  canvas.style.top = `${stage.offsetTop}px`;
+  canvas.style.right = 'auto';
+  canvas.style.bottom = 'auto';
+}
+
+function clearBackgroundWave() {
+  if (!bgCtx) {
+    return;
+  }
+
+  bgCtx.fillStyle = 'rgba(2, 4, 6, 1)';
+  bgCtx.fillRect(0, 0, bgCanvas.clientWidth, bgCanvas.clientHeight);
+  uiState.bgWaveCleared = true;
+}
+
+function clearFlatView() {
+  if (!flatCtx) {
+    return;
+  }
+
+  flatCtx.clearRect(0, 0, flatCanvas.clientWidth, flatCanvas.clientHeight);
+  uiState.flatViewCleared = true;
 }
 
 async function toggleFullscreen() {
