@@ -5,6 +5,7 @@ import { clamp, hslToRgb, modulo, TWO_PI } from './math-utils.js';
 const GLOBE_RADIUS = 100;
 const GLOBE_SCALE = 0.035;
 const Y_AXIS = new THREE.Vector3(0, 1, 0);
+const BURST_POINT_COUNT = 192;
 
 export class EarthModeView {
   constructor({ scene, bandCount = 48, pointCount = 64 }) {
@@ -20,6 +21,11 @@ export class EarthModeView {
     this.ringId = 0;
     this.spinSpeed = 1.35;
     this.lastElapsed = 0;
+    this.burstCursor = 0;
+    this.burstLife = new Float32Array(BURST_POINT_COUNT);
+    this.burstPosition = new Float32Array(BURST_POINT_COUNT * 3);
+    this.burstVelocity = new Float32Array(BURST_POINT_COUNT * 3);
+    this.burstColor = new Float32Array(BURST_POINT_COUNT * 3);
 
     this.group = new THREE.Group();
     this.group.position.set(0, 0, 0.2);
@@ -151,6 +157,24 @@ export class EarthModeView {
     );
     this.group.add(this.aura);
 
+    this.burstGeometry = new THREE.BufferGeometry();
+    this.burstGeometry.setAttribute('position', new THREE.BufferAttribute(this.burstPosition, 3));
+    this.burstGeometry.setAttribute('color', new THREE.BufferAttribute(this.burstColor, 3));
+    this.burstGeometry.setDrawRange(0, 0);
+    this.burstPoints = new THREE.Points(
+      this.burstGeometry,
+      new THREE.PointsMaterial({
+        size: 3.8,
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0.48,
+        vertexColors: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      })
+    );
+    this.group.add(this.burstPoints);
+
     this.tempMatrix = new THREE.Matrix4();
     this.tempQuat = new THREE.Quaternion();
     this.identityQuat = new THREE.Quaternion();
@@ -158,6 +182,8 @@ export class EarthModeView {
     this.tempPos = new THREE.Vector3();
     this.tempTip = new THREE.Vector3();
     this.tempNormal = new THREE.Vector3();
+    this.tempTangent = new THREE.Vector3();
+    this.tempBitangent = new THREE.Vector3();
     this.connectedIds = new Uint16Array(pointCount);
 
     this.paintOverlay(0, emptyFrame());
@@ -216,21 +242,21 @@ export class EarthModeView {
       const bandLift = Math.pow(clamp(band, 0, 1.6), 0.58);
       const targetHeight =
         4 +
-        bandLift * (38 + point.weight * 28) +
-        globalDrive * (10 + point.weight * 18) +
-        transientDrive * (9 + harmonic * 18) +
-        frame.beatPulse * bandLift * 26;
+        bandLift * (26 + point.weight * 18) +
+        globalDrive * (8 + point.weight * 12) +
+        transientDrive * (6 + harmonic * 12) +
+        frame.beatPulse * bandLift * 14;
 
       const currentHeight = this.heights[index];
       const targetDelta = targetHeight - currentHeight;
       const stiffness = targetDelta >= 0 ? 0.34 : 0.14;
       const beatKick = Math.max(0, frame.beatPulse - 0.24) * (0.75 + bandLift * 2.2 + point.weight * 0.8);
       this.heightVelocity[index] = clamp(
-        this.heightVelocity[index] * 0.62 + targetDelta * stiffness + beatKick * 0.22,
-        -8,
-        10
+        this.heightVelocity[index] * 0.68 + targetDelta * stiffness + beatKick * 0.14,
+        -6.5,
+        7.5
       );
-      this.heights[index] = clamp(currentHeight + this.heightVelocity[index], 3, 118);
+      this.heights[index] = clamp(currentHeight + this.heightVelocity[index], 3, 86);
 
       const altitude = this.heights[index] / GLOBE_RADIUS;
       const surface = this.globe.getCoords(point.lat, point.lng, 0.008);
@@ -252,7 +278,7 @@ export class EarthModeView {
       this.pointColors[index] = color;
       this.spikeMesh.setColorAt(index, color);
 
-      const tipScale = 1.2 + bandLift * 5.2 + transientDrive * 1.2 + frame.beatPulse * 3.4;
+      const tipScale = 1.1 + bandLift * 3.4 + transientDrive * 0.85 + frame.beatPulse * 2.1;
       this.tempScale.setScalar(tipScale);
       this.tempMatrix.compose(this.tempTip, this.identityQuat, this.tempScale);
       this.tipMesh.setMatrixAt(index, this.tempMatrix);
@@ -287,29 +313,43 @@ export class EarthModeView {
     const activeCount = clamp(Math.floor(10 + globalDrive * 34 + transientDrive * 10), 8, this.pointCount);
 
     if (frame.beat || frame.beatPulse > 0.72) {
-      const root = this.points[rootId];
-      const rootColor = this.scoreBuffer[0]?.color || new THREE.Color(0.7, 0.9, 1);
-      this.rings.push({
-        id: this.ringId += 1,
-        lat: root.lat,
-        lng: root.lng,
-        altitude: 0.012,
-        maxRadius: 12 + frame.beatPulse * 18,
-        speed: 1.2 + frame.bassEnergy * 3.4,
-        period: 1200,
-        expiresAt: elapsed + 1.6,
-        alpha: 0.55 + frame.beatPulse * 0.3,
-        color: [
-          Math.round(rootColor.r * 255),
-          Math.round(rootColor.g * 255),
-          Math.round(rootColor.b * 255),
-        ],
-      });
+      const ringCount = Math.max(1, Math.min(4, Math.floor(1 + frame.beatPulse * 3 + frame.spectralFlux * 1.5)));
+      for (let ringIndex = 0; ringIndex < ringCount; ringIndex += 1) {
+        const rank = Math.min(
+          this.scoreBuffer.length - 1,
+          ringIndex * Math.max(1, Math.floor(activeCount / Math.max(1, ringCount)))
+        );
+        const source = this.scoreBuffer[rank] || this.scoreBuffer[0];
+        const ringPoint = this.points[source?.id ?? rootId];
+        const ringColor = source?.color || this.scoreBuffer[0]?.color || new THREE.Color(0.7, 0.9, 1);
+        this.rings.push({
+          id: this.ringId += 1,
+          lat: ringPoint.lat,
+          lng: ringPoint.lng,
+          altitude: 0.02 + frame.beatPulse * 0.016,
+          maxRadius: 18 + frame.beatPulse * 24 + frame.spectralFlux * 10,
+          speed: 1.8 + frame.bassEnergy * 4.4,
+          period: 1400,
+          expiresAt: elapsed + 1.9,
+          alpha: 0.82 + frame.beatPulse * 0.24,
+          color: [
+            Math.round(ringColor.r * 255),
+            Math.round(ringColor.g * 255),
+            Math.round(ringColor.b * 255),
+          ],
+        });
+      }
     }
 
     this.rings = this.rings.filter((ring) => ring.expiresAt > elapsed);
     this.globe.ringsData(this.rings);
 
+    if (transientDrive > 1.45 || frame.beatPulse > 0.9) {
+      const burstCount = Math.max(3, Math.min(14, Math.floor(3 + transientDrive * 3.2 + frame.beatPulse * 4)));
+      this.spawnBurstParticles(burstCount, activeCount, transientDrive, frame);
+    }
+
+    this.updateBurstParticles(delta, frame);
     this.rebuildEdges(activeCount, globalDrive);
   }
 
@@ -425,6 +465,7 @@ export class EarthModeView {
     this.tipMesh.material.opacity = 0.08 + a * 0.92;
     this.edgeLines.material.opacity = 0.04 + a * 0.62;
     this.aura.material.opacity = 0.02 + a * 0.08;
+    this.burstPoints.material.opacity = 0.04 + a * 0.42;
     this.sunLight.visible = a > 0.01;
     this.nightFill.visible = a > 0.01;
 
@@ -437,6 +478,100 @@ export class EarthModeView {
 
   setSpinSpeed(speed) {
     this.spinSpeed = clamp(Number(speed) || 1.35, 0.2, 4);
+  }
+
+  spawnBurstParticles(count, activeCount, transientDrive, frame) {
+    const sourceCount = Math.min(
+      this.scoreBuffer.length,
+      Math.max(12, Math.min(this.pointCount, Math.floor(activeCount * 0.95)))
+    );
+    if (sourceCount <= 0) {
+      return;
+    }
+
+    for (let burstIndex = 0; burstIndex < count; burstIndex += 1) {
+      const spreadRank =
+        count <= 1 ? 0 : Math.floor((burstIndex / Math.max(1, count - 1)) * Math.max(1, sourceCount - 1));
+      const wrappedOffset = (this.burstCursor * 9 + burstIndex * 7) % sourceCount;
+      const source = this.scoreBuffer[(spreadRank + wrappedOffset) % sourceCount];
+      if (!source) {
+        continue;
+      }
+
+      const id = source.id;
+      const offset = id * 3;
+      const px = this.tipWorld[offset];
+      const py = this.tipWorld[offset + 1];
+      const pz = this.tipWorld[offset + 2];
+      const color = this.pointColors[id] || source.color || new THREE.Color(0.85, 0.93, 1);
+
+      this.tempNormal.set(px, py, pz).normalize();
+      this.tempTangent.set(-this.tempNormal.z, 0, this.tempNormal.x);
+      if (this.tempTangent.lengthSq() < 1e-5) {
+        this.tempTangent.set(1, 0, 0);
+      }
+      this.tempTangent.normalize();
+      this.tempBitangent.crossVectors(this.tempNormal, this.tempTangent).normalize();
+
+      const turn = (this.burstCursor * 0.7548776662466927 + burstIndex * 0.37) % 1;
+      const orbitAngle = turn * TWO_PI;
+      const sideA = Math.cos(orbitAngle) * (0.22 + frame.beatPulse * 0.35);
+      const sideB = Math.sin(orbitAngle) * (0.22 + frame.spectralFlux * 0.32);
+      const outward = 0.65 + transientDrive * 0.38 + frame.beatPulse * 0.52;
+
+      const writeIndex = this.burstCursor;
+      const writeOffset = writeIndex * 3;
+      const launchOffset = 2.2 + frame.beatPulse * 1.6 + transientDrive * 0.9;
+      this.burstPosition[writeOffset] = px + this.tempNormal.x * launchOffset;
+      this.burstPosition[writeOffset + 1] = py + this.tempNormal.y * launchOffset;
+      this.burstPosition[writeOffset + 2] = pz + this.tempNormal.z * launchOffset;
+      this.burstVelocity[writeOffset] =
+        this.tempNormal.x * outward + this.tempTangent.x * sideA + this.tempBitangent.x * sideB;
+      this.burstVelocity[writeOffset + 1] =
+        this.tempNormal.y * outward + this.tempTangent.y * sideA + this.tempBitangent.y * sideB;
+      this.burstVelocity[writeOffset + 2] =
+        this.tempNormal.z * outward + this.tempTangent.z * sideA + this.tempBitangent.z * sideB;
+      this.burstColor[writeOffset] = color.r;
+      this.burstColor[writeOffset + 1] = color.g;
+      this.burstColor[writeOffset + 2] = color.b;
+      this.burstLife[writeIndex] = clamp(0.55 + transientDrive * 0.24 + frame.beatPulse * 0.18, 0.45, 1.3);
+      this.burstCursor = (this.burstCursor + 1) % BURST_POINT_COUNT;
+    }
+  }
+
+  updateBurstParticles(delta, frame) {
+    for (let index = 0; index < BURST_POINT_COUNT; index += 1) {
+      const life = this.burstLife[index];
+      const offset = index * 3;
+      if (life <= 0.001) {
+        this.burstPosition[offset] = 0;
+        this.burstPosition[offset + 1] = 0;
+        this.burstPosition[offset + 2] = 0;
+        this.burstColor[offset] = 0;
+        this.burstColor[offset + 1] = 0;
+        this.burstColor[offset + 2] = 0;
+        continue;
+      }
+
+      const nextLife = Math.max(0, life - delta * (1.15 + frame.spectralFlux * 0.8));
+      this.burstLife[index] = nextLife;
+      this.burstPosition[offset] += this.burstVelocity[offset] * delta * 22;
+      this.burstPosition[offset + 1] += this.burstVelocity[offset + 1] * delta * 22;
+      this.burstPosition[offset + 2] += this.burstVelocity[offset + 2] * delta * 22;
+      this.burstVelocity[offset] *= 0.965;
+      this.burstVelocity[offset + 1] *= 0.965;
+      this.burstVelocity[offset + 2] *= 0.965;
+
+      const fade = clamp(nextLife, 0, 1);
+      this.burstColor[offset] *= 0.988 + fade * 0.008;
+      this.burstColor[offset + 1] *= 0.988 + fade * 0.008;
+      this.burstColor[offset + 2] *= 0.988 + fade * 0.008;
+    }
+
+    this.burstGeometry.setDrawRange(0, BURST_POINT_COUNT);
+    this.burstGeometry.attributes.position.needsUpdate = true;
+    this.burstGeometry.attributes.color.needsUpdate = true;
+    this.burstPoints.material.size = 2.8 + frame.beatPulse * 2.2 + frame.spectralFlux * 1.2;
   }
 
   pauseGlobe() {

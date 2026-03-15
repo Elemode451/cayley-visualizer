@@ -98,7 +98,7 @@ const audio = new AudioEngine({
 });
 
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(0x071a1d, 8, 22);
+scene.fog = new THREE.Fog(0x071a1d, 10, 30);
 
 const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
 camera.position.set(0, -10, 5);
@@ -1058,7 +1058,7 @@ function clearFlatView() {
 }
 
 async function toggleFullscreen() {
-  const target = document.querySelector('.viewport-wrap');
+  const target = document.documentElement;
   if (!target) {
     return;
   }
