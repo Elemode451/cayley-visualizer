@@ -34,6 +34,8 @@ const loadYoutubeBtn = document.getElementById('loadYoutubeBtn');
 const playPauseBtn = document.getElementById('playPauseBtn');
 const restartBtn = document.getElementById('restartBtn');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
+const recordBtn = document.getElementById('recordBtn');
+const exportFrameBtn = document.getElementById('exportFrameBtn');
 const viewportPresetSelect = document.getElementById('viewportPreset');
 const gpuPriorityToggle = document.getElementById('gpuPriorityToggle');
 const gainSlider = document.getElementById('gainSlider');
@@ -69,6 +71,17 @@ const uiState = {
   bgWaveEnabled: Boolean(bgWaveEnabled?.checked ?? true),
   bgWaveCleared: false,
   flatViewCleared: false,
+  currentStage: null,
+  recording: false,
+};
+
+const exportCanvas = document.createElement('canvas');
+const exportCtx = exportCanvas.getContext('2d', { alpha: true });
+const recordingState = {
+  mediaRecorder: null,
+  chunks: [],
+  stream: null,
+  videoTrack: null,
 };
 
 const audio = new AudioEngine({
@@ -280,6 +293,27 @@ fullscreenBtn.addEventListener('click', async () => {
   await toggleFullscreen();
 });
 
+recordBtn?.addEventListener('click', async () => {
+  if (uiState.recording) {
+    stopRecording();
+    return;
+  }
+
+  try {
+    await startRecording();
+  } catch (error) {
+    setStatus(`Recording failed: ${error?.message || error}`);
+  }
+});
+
+exportFrameBtn?.addEventListener('click', async () => {
+  try {
+    await exportFramePng();
+  } catch (error) {
+    setStatus(`Frame export failed: ${error?.message || error}`);
+  }
+});
+
 document.addEventListener('fullscreenchange', () => {
   const active = Boolean(document.fullscreenElement);
   fullscreenBtn.textContent = active ? 'Exit Fullscreen' : 'Fullscreen';
@@ -419,6 +453,9 @@ function animate() {
 
   controls.update();
   renderer.render(scene, camera);
+  if (uiState.recording) {
+    renderExportFrame();
+  }
 }
 
 function updateExcitement(frame) {
@@ -630,6 +667,195 @@ function getActiveMode() {
   return MODE_CONFIG[uiState.modeIndex] || MODE_CONFIG[0];
 }
 
+async function startRecording() {
+  if (!exportCanvas.captureStream || !window.MediaRecorder) {
+    throw new Error('This browser does not support canvas recording.');
+  }
+
+  renderExportFrame();
+
+  const videoStream = exportCanvas.captureStream(60);
+  const videoTrack = videoStream.getVideoTracks()[0];
+  const tracks = [];
+  if (videoTrack) {
+    tracks.push(videoTrack);
+  }
+
+  const audioStream = audio.getRecordingStream();
+  if (audioStream) {
+    for (const track of audioStream.getAudioTracks()) {
+      tracks.push(track);
+    }
+  }
+
+  const mimeType = getSupportedRecordingMimeType();
+  recordingState.stream = new MediaStream(tracks);
+  recordingState.videoTrack = videoTrack;
+  recordingState.chunks = [];
+  recordingState.mediaRecorder = new MediaRecorder(
+    recordingState.stream,
+    mimeType
+      ? {
+          mimeType,
+          videoBitsPerSecond: 16_000_000,
+          audioBitsPerSecond: 192_000,
+        }
+      : {
+          videoBitsPerSecond: 16_000_000,
+          audioBitsPerSecond: 192_000,
+        }
+  );
+
+  recordingState.mediaRecorder.addEventListener('dataavailable', (event) => {
+    if (event.data && event.data.size > 0) {
+      recordingState.chunks.push(event.data);
+    }
+  });
+  recordingState.mediaRecorder.addEventListener('stop', flushRecordingDownload);
+
+  recordingState.mediaRecorder.start(1000);
+  uiState.recording = true;
+  recordBtn.textContent = 'Stop Recording';
+
+  const preset = getViewportPreset();
+  setStatus(
+    preset.id === 'phone-1080x1920'
+      ? 'Recording started at 1080x1920.'
+      : `Recording started at ${exportCanvas.width}x${exportCanvas.height}. For phone export, choose Phone Portrait 1080x1920.`
+  );
+}
+
+function stopRecording() {
+  const recorder = recordingState.mediaRecorder;
+  if (!recorder || recorder.state === 'inactive') {
+    return;
+  }
+
+  uiState.recording = false;
+  recordBtn.textContent = 'Start Recording';
+  recorder.stop();
+  setStatus('Finishing recording export...');
+}
+
+async function exportFramePng() {
+  renderExportFrame();
+  const blob = await canvasToBlob(exportCanvas, 'image/png');
+  downloadBlob(blob, buildExportFilename('png'));
+  setStatus(`Exported frame at ${exportCanvas.width}x${exportCanvas.height}.`);
+}
+
+function flushRecordingDownload() {
+  const mimeType = recordingState.mediaRecorder?.mimeType || 'video/webm';
+  const blob = new Blob(recordingState.chunks, { type: mimeType });
+  const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+  downloadBlob(blob, buildExportFilename(extension));
+
+  recordingState.mediaRecorder = null;
+  recordingState.chunks = [];
+  recordingState.videoTrack?.stop();
+  recordingState.videoTrack = null;
+  recordingState.stream = null;
+  setStatus(`Recording saved at ${exportCanvas.width}x${exportCanvas.height}.`);
+}
+
+function renderExportFrame() {
+  const stage = uiState.currentStage;
+  if (!stage || !exportCtx) {
+    return;
+  }
+
+  if (exportCanvas.width !== stage.renderWidth || exportCanvas.height !== stage.renderHeight) {
+    exportCanvas.width = stage.renderWidth;
+    exportCanvas.height = stage.renderHeight;
+  }
+
+  exportCtx.clearRect(0, 0, exportCanvas.width, exportCanvas.height);
+  exportCtx.fillStyle = '#020406';
+  exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+  if (uiState.bgWaveEnabled && !uiState.gpuPriorityEnabled && getCanvasOpacity(bgCanvas) > 0) {
+    const bgScaleX = bgCanvas.width / Math.max(1, window.innerWidth);
+    const bgScaleY = bgCanvas.height / Math.max(1, window.innerHeight);
+    exportCtx.save();
+    exportCtx.globalAlpha = getCanvasOpacity(bgCanvas);
+    exportCtx.drawImage(
+      bgCanvas,
+      stage.offsetLeft * bgScaleX,
+      stage.offsetTop * bgScaleY,
+      stage.displayWidth * bgScaleX,
+      stage.displayHeight * bgScaleY,
+      0,
+      0,
+      exportCanvas.width,
+      exportCanvas.height
+    );
+    exportCtx.restore();
+  }
+
+  exportCtx.save();
+  exportCtx.globalAlpha = getCanvasOpacity(viewCanvas);
+  exportCtx.drawImage(viewCanvas, 0, 0, exportCanvas.width, exportCanvas.height);
+  exportCtx.restore();
+
+  if (!uiState.gpuPriorityEnabled) {
+    exportCtx.save();
+    exportCtx.globalAlpha = getCanvasOpacity(flatCanvas);
+    exportCtx.drawImage(flatCanvas, 0, 0, exportCanvas.width, exportCanvas.height);
+    exportCtx.restore();
+  }
+}
+
+function getCanvasOpacity(canvas) {
+  const opacity = Number.parseFloat(canvas.style.opacity || '1');
+  return Number.isFinite(opacity) ? opacity : 1;
+}
+
+function getSupportedRecordingMimeType() {
+  const candidates = [
+    'video/webm;codecs=vp9,opus',
+    'video/webm;codecs=vp8,opus',
+    'video/webm',
+  ];
+  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || '';
+}
+
+function buildExportFilename(extension) {
+  const now = new Date();
+  const stamp = [
+    now.getFullYear(),
+    String(now.getMonth() + 1).padStart(2, '0'),
+    String(now.getDate()).padStart(2, '0'),
+    '-',
+    String(now.getHours()).padStart(2, '0'),
+    String(now.getMinutes()).padStart(2, '0'),
+    String(now.getSeconds()).padStart(2, '0'),
+  ].join('');
+  return `visualizer-${exportCanvas.width}x${exportCanvas.height}-${stamp}.${extension}`;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function canvasToBlob(canvas, type) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        resolve(blob);
+        return;
+      }
+      reject(new Error('Could not export canvas.'));
+    }, type);
+  });
+}
+
 function createRenderer(powerPreference) {
   const nextRenderer = new THREE.WebGLRenderer({
     canvas: viewCanvas,
@@ -695,12 +921,15 @@ function setCanvasSize() {
   const wrapWidth = Math.max(1, wrap.clientWidth);
   const wrapHeight = Math.max(1, wrap.clientHeight);
   const stage = getViewportStage(wrapWidth, wrapHeight);
+  uiState.currentStage = stage;
   camera.aspect = stage.displayWidth / stage.displayHeight;
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(1);
   renderer.setSize(stage.renderWidth, stage.renderHeight, false);
   applyCanvasStage(viewCanvas, stage);
   applyCanvasStage(flatCanvas, stage);
+  exportCanvas.width = stage.renderWidth;
+  exportCanvas.height = stage.renderHeight;
 
   const dpr = Math.min(window.devicePixelRatio, 2);
 

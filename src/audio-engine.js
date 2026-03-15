@@ -11,6 +11,7 @@ export class AudioEngine {
     this.audioContext = null;
     this.analyser = null;
     this.gainNode = null;
+    this.recordingDestination = null;
     this.sourceNode = null;
     this.fileSourceNode = null;
     this.micStream = null;
@@ -65,9 +66,11 @@ export class AudioEngine {
 
       this.gainNode = this.audioContext.createGain();
       this.gainNode.gain.value = gain;
+      this.recordingDestination = this.audioContext.createMediaStreamDestination();
 
       this.analyser.connect(this.gainNode);
       this.gainNode.connect(this.audioContext.destination);
+      this.gainNode.connect(this.recordingDestination);
     }
 
     if (this.audioContext.state === 'suspended') {
@@ -462,5 +465,9 @@ export class AudioEngine {
     } catch {
       return 'audio source';
     }
+  }
+
+  getRecordingStream() {
+    return this.recordingDestination?.stream || null;
   }
 }

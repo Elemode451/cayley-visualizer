@@ -44,6 +44,8 @@ npm start
 - `YouTube URL` + `Load YouTube Link`: resolves a YouTube link to a playable audio stream (requires Node server mode + `yt-dlp`).
   If YouTube extraction breaks, update with `python -m pip install -U yt-dlp`.
 - `Play / Pause`: toggles file playback.
+- `Start Recording`: records the composed viewport to video. With `Phone Portrait 1080x1920` selected, the export is recorded at true `1080x1920`.
+- `Export Frame PNG`: saves a still image of the current composed viewport at the active render resolution.
 - `Gain`: output gain.
 - `Viewport Preset`: choose `Phone Portrait 1080x1920` for a centered 9:16 stage that is easier to fullscreen-record for mobile.
 - `GPU Priority Mode`: requests the browser's high-performance WebGL path and disables the CPU-heavy 2D overlays so more of the frame budget goes to the GPU.
