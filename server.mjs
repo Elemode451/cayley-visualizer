@@ -12,9 +12,12 @@ let ytDlpCandidatesPromise = null;
 const MIME = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
+  '.jpeg': 'image/jpeg',
   '.js': 'text/javascript; charset=utf-8',
+  '.jpg': 'image/jpeg',
   '.json': 'application/json; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
+  '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.wav': 'audio/wav',
   '.mp3': 'audio/mpeg',

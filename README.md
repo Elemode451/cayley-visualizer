@@ -60,6 +60,7 @@ npm start
   - Original Torus
   - Free-Group Flower
   - Fourier Image Waves
+  - Earth Mode
 
 ## Visual Mapping
 
@@ -95,6 +96,7 @@ The code is organized into modules under `src/`:
 - `original-torus-view.js` for the Cayley torus mesh.
 - `free-group-flower-view.js` for the free-group growth projection on a torus.
 - `fourier-image-view.js` for FFT image mode with propagating waves.
+- `earth-mode-view.js` for the rotating globe graph driven by beat intensity.
 - `fft-utils.js` and `math-utils.js` for reusable math helpers.
 
 ## Free-Group Generator Config

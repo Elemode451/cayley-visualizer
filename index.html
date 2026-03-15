@@ -76,9 +76,17 @@
             Flower Projection
             <input id="flowerSpreadSlider" type="range" min="0.5" max="2.5" step="0.01" value="1" />
           </label>
+          <label>
+            Earth Spin Speed
+            <input id="earthSpinSlider" type="range" min="0.2" max="4" step="0.01" value="1.35" />
+          </label>
           <label class="toggle-check">
             <input id="bgWaveEnabled" type="checkbox" checked />
             Background Wave Enabled
+          </label>
+          <label class="toggle-check">
+            <input id="flatOverlayEnabled" type="checkbox" checked />
+            2D Overlay Enabled
           </label>
         </div>
 
@@ -121,8 +129,12 @@
     <script type="importmap">
       {
         "imports": {
-          "three": "https://cdn.jsdelivr.net/npm/three@0.162.0/build/three.module.js",
-          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.162.0/examples/jsm/"
+          "three": "./node_modules/three/build/three.module.js",
+          "three/addons/": "./node_modules/three/examples/jsm/",
+          "three/examples/": "./node_modules/three/examples/",
+          "three/webgpu": "./node_modules/three/build/three.webgpu.js",
+          "three/tsl": "./node_modules/three/build/three.tsl.js",
+          "three-globe": "https://esm.sh/three-globe@2.45.1?external=three"
         }
       }
     </script>

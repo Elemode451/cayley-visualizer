@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { AudioEngine } from './src/audio-engine.js';
+import { EarthModeView } from './src/earth-mode-view.js';
 import { FourierImageView } from './src/fourier-image-view.js';
 import { FreeGroupFlowerView } from './src/free-group-flower-view.js';
 import { clamp, smoothstep, TWO_PI } from './src/math-utils.js';
@@ -22,7 +23,8 @@ const VIEWPORT_PRESETS = [
 const MODE_CONFIG = [
   { id: 'original', label: 'Original Torus', button: 'Switch To Free-Group Flower' },
   { id: 'flower', label: 'Free-Group Flower', button: 'Switch To Fourier Image Waves' },
-  { id: 'image', label: 'Fourier Image Waves', button: 'Switch To Original Torus' },
+  { id: 'image', label: 'Fourier Image Waves', button: 'Switch To Earth Mode' },
+  { id: 'earth', label: 'Earth Mode', button: 'Switch To Original Torus' },
 ];
 
 const bgCanvas = document.getElementById('bgWave');
@@ -44,8 +46,10 @@ const heightSlider = document.getElementById('heightSlider');
 const morphSlider = document.getElementById('morphSlider');
 const bgWaveOpacitySlider = document.getElementById('bgWaveOpacitySlider');
 const bgWaveEnabled = document.getElementById('bgWaveEnabled');
+const flatOverlayEnabled = document.getElementById('flatOverlayEnabled');
 const flowerHueBlendSlider = document.getElementById('flowerHueBlendSlider');
 const flowerSpreadSlider = document.getElementById('flowerSpreadSlider');
+const earthSpinSlider = document.getElementById('earthSpinSlider');
 const torusToggleBtn = document.getElementById('torusToggleBtn');
 const torusToggleState = document.getElementById('torusToggleState');
 const statusEl = document.getElementById('status');
@@ -69,6 +73,7 @@ const uiState = {
   viewportPresetId: viewportPresetSelect?.value || 'auto',
   gpuPriorityEnabled: Boolean(gpuPriorityToggle?.checked ?? false),
   bgWaveEnabled: Boolean(bgWaveEnabled?.checked ?? true),
+  flatOverlayEnabled: Boolean(flatOverlayEnabled?.checked ?? true),
   bgWaveCleared: false,
   flatViewCleared: false,
   currentStage: null,
@@ -101,7 +106,8 @@ camera.position.set(0, -10, 5);
 let renderer = createRenderer(uiState.gpuPriorityEnabled ? 'high-performance' : 'default');
 let controls = createControls(renderer);
 
-scene.add(new THREE.AmbientLight(0xb8d8ff, 0.5));
+const ambientLight = new THREE.AmbientLight(0xb8d8ff, 0.5);
+scene.add(ambientLight);
 const keyLight = new THREE.DirectionalLight(0xffdcb3, 1.05);
 keyLight.position.set(5, -7, 8);
 scene.add(keyLight);
@@ -134,6 +140,13 @@ const fourierImageView = new FourierImageView({
   width: 8.2,
   height: 4.9,
 });
+
+const earthModeView = new EarthModeView({
+  scene,
+  bandCount: GRID_V,
+  pointCount: 64,
+});
+earthModeView.setSpinSpeed(Number(earthSpinSlider?.value || 1.35));
 
 setCanvasSize();
 window.addEventListener('resize', setCanvasSize);
@@ -239,6 +252,17 @@ bgWaveEnabled?.addEventListener('change', () => {
   if (uiState.bgWaveEnabled) {
     uiState.bgWaveCleared = false;
   }
+});
+
+flatOverlayEnabled?.addEventListener('change', () => {
+  uiState.flatOverlayEnabled = Boolean(flatOverlayEnabled.checked);
+  if (uiState.flatOverlayEnabled) {
+    uiState.flatViewCleared = false;
+  }
+});
+
+earthSpinSlider?.addEventListener('input', () => {
+  earthModeView.setSpinSpeed(Number(earthSpinSlider.value));
 });
 
 viewportPresetSelect?.addEventListener('change', () => {
@@ -405,10 +429,12 @@ function animate() {
   updateMorphState();
   updateModeLabel();
   updateBlendState();
+  updateSceneLighting(activeMode.id);
 
   const needsOriginal = activeMode.id === 'original';
   const needsFlower = activeMode.id === 'flower';
   const needsImage = activeMode.id === 'image';
+  const needsEarth = activeMode.id === 'earth';
 
   if (needsOriginal) {
     originalTorus.update(elapsed, {
@@ -432,6 +458,10 @@ function animate() {
     fourierImageView.update(elapsed, frame, true);
   }
 
+  if (needsEarth) {
+earthModeView.update(elapsed, frame, true);
+  }
+
   if (uiState.bgWaveEnabled) {
     if (uiState.gpuPriorityEnabled) {
       clearBackgroundWave();
@@ -443,7 +473,7 @@ function animate() {
     clearBackgroundWave();
   }
 
-  if (uiState.gpuPriorityEnabled) {
+  if (uiState.gpuPriorityEnabled || !uiState.flatOverlayEnabled) {
     clearFlatView();
   } else {
     drawCharacterWheel(elapsed, frame);
@@ -496,10 +526,12 @@ function updateBlendState() {
   const originalBlend = mode.id === 'original' ? threeOpacity : 0;
   const flowerBlend = mode.id === 'flower' ? threeOpacity : 0;
   const imageBlend = mode.id === 'image' ? threeOpacity : 0;
+  const earthBlend = mode.id === 'earth' ? threeOpacity : 0;
 
   originalTorus.setBlend(originalBlend);
   freeFlowerTorus.setBlend(flowerBlend);
   fourierImageView.setBlend(imageBlend);
+  earthModeView.setBlend(earthBlend);
 }
 
 function updateTorusToggleUI() {
@@ -665,6 +697,19 @@ function updateStats(frame) {
 
 function getActiveMode() {
   return MODE_CONFIG[uiState.modeIndex] || MODE_CONFIG[0];
+}
+
+function updateSceneLighting(modeId) {
+  if (modeId === 'earth') {
+    ambientLight.intensity = 0.12;
+    keyLight.intensity = 0.16;
+    fillLight.intensity = 0.12;
+    return;
+  }
+
+  ambientLight.intensity = 0.5;
+  keyLight.intensity = 1.05;
+  fillLight.intensity = 0.7;
 }
 
 async function startRecording() {
